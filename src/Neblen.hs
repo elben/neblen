@@ -2,4 +2,6 @@
 
 module Neblen (module X) where
 
+import Neblen.Data as X
 import Neblen.Compiler as X
+import Neblen.Parser as X
