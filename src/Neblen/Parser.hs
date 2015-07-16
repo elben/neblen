@@ -9,6 +9,15 @@ import Text.ParserCombinators.Parsec
 -- >>> :set -XOverloadedStrings
 -- >>> import Data.Either
 
+parseDef :: Parser Exp
+parseDef = do
+  keyword <- try $ string "def"
+  var <- parseVar
+  body <- parseExp
+  case keyword of
+    "def" -> return $ Def var body
+    _     -> unexpected "Not a keyword"
+
 -- | Parse string.
 --
 -- >>> parse parseString "" "\"Hello\""
@@ -178,11 +187,30 @@ symbolIds = oneOf validIdSymbols
 -- >>> parse parseList "" "((0 \"foo\" true))"
 -- Right (List [List [Literal (IntV 0),Literal (StringV "foo"),Literal (BoolV True)]])
 --
+-- >>> parse parseList "" "(def x 123)"
+-- Right (Def (Var "x") (Literal (IntV 123)))
+--
+-- >>> parse parseList "" "(x 123 y)"
+-- FIXME
+--
+-- -- ^ multiple functions calls? Would need to solve Currying here in the AST
+-- building?
+--
+-- >>> parse parseList "" "(fn [x] (+ x 123))"
+-- FIXME
+--
 -- >>> isLeft $ parse parseList "" "(123 456"
 -- True
 --
 parseList :: Parser Exp
-parseList = parseListWithSurrounding '(' ')' List
+parseList = do
+  list <- parseListWithSurrounding '(' ')' List
+  return $ convertListToWhat list
+
+-- TODO convert function declarations, function calls.
+convertListToWhat :: Exp -> Exp
+convertListToWhat (List [Var "def", Var v, body]) = Def (Var v) body
+convertListToWhat l = l
 
 -- | Parse vectors.
 --
@@ -219,6 +247,9 @@ parseListWithSurrounding l r f = do
 --
 -- >>> parse parseExp "" "+ 13"
 -- Right (Var "+")
+--
+-- >>> parse parseExp "" "(def x 123)"
+-- Right (Def (Var "x") (Literal (IntV 123)))
 --
 parseExp :: Parser Exp
 parseExp = parseString <|> parseBool <|> parseInt <|> parseVar <|> parseList <|> parseVector
