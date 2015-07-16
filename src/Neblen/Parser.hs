@@ -41,7 +41,10 @@ parseString = do
 --
 parseBool :: Parser Exp
 parseBool = do
-  s <- string "true" <|> string "false"
+  -- 'string' consumes input, so use 'try' so that no input is consumed if the
+  -- literal is not true or false. This way, variables that are prefixed with
+  -- any prefix of "true" or "false" can be parsed (e.g. 'fx' or 'true-thing').
+  s <- try (string "true") <|> try (string "false")
   return $ Literal (BoolV (s == "true"))
 
 -- | Parse Integers.
@@ -66,12 +69,27 @@ parseInt = do
 -- | Parse variable identifier. Identifiers must be prefixed with either a
 -- letter, dash (-) or underscore (_). Or a reserved symbol identifier.
 --
+-- >>> parse parseVar "" "x"
+-- Right (Var "x")
+--
+-- >>> parse parseVar "" "abc-def"
+-- Right (Var "abc-def")
+--
+-- >>> parse parseVar "" ">>="
+-- Right (Var ">>=")
+--
+-- >>> parse parseVar "" "-"
+-- Right (Var "-")
+--
+-- >>> isLeft $ parse parseVar "" "_"
+-- True
+--
 parseVar :: Parser Exp
-parseVar = parseAlphaNumericId <|> parseSymbolId
+parseVar = try parseAlphaNumericId <|> parseSymbolId
 
 -- | Parse an alpha-numeric identifier.
 --
--- >>> parse parseVar "" "abc"
+-- >>> parse parseAlphaNumericId "" "abc"
 -- Right (Var "abc")
 --
 -- >>> parse parseAlphaNumericId "" "_abc"
@@ -83,6 +101,9 @@ parseVar = parseAlphaNumericId <|> parseSymbolId
 -- >>> isLeft $ parse parseAlphaNumericId "" "-"
 -- True
 --
+-- >>> isLeft $ parse parseAlphaNumericId "" "-123"
+-- True
+--
 -- >>> isLeft $ parse parseAlphaNumericId "" "_"
 -- True
 --
@@ -91,9 +112,26 @@ parseVar = parseAlphaNumericId <|> parseSymbolId
 --
 parseAlphaNumericId :: Parser Exp
 parseAlphaNumericId = do
-  prefix <- letter <|> char '-' <|> char '_' <?> "Non-symbolic identifier must start with a letter, dash or underscore."
-  s <- many1 (alphaNum <|> char '-' <|> char '_') <?> "Non-symbolic identifier must consist of alphanumeric characters, dashes and underscores."
-  return $ Var (prefix : s)
+  -- Get first character.
+  p <- letter <|> char '-' <|> char '_'
+
+  -- If first character was a - or _, then needs to be followed one letter, then
+  -- zero or more alphanumerics (e.g. -123 is invalid, but -abc is valid).
+  --
+  -- Else, it can be followed by zero or more alphanumerics.
+  --
+  -- TODO: How to simplify this?
+  if p == '-' || p == '_'
+    then (do
+      p' <- letter
+      rest <- restOfAlphaNumericId
+      return $ Var (p : p' : rest))
+    else (do
+      rest <- restOfAlphaNumericId
+      return $ Var (p : rest))
+
+restOfAlphaNumericId :: Parser String
+restOfAlphaNumericId = many (alphaNum <|> char '-' <|> char '_') <?> "Non-symbolic identifier must consist of alphanumeric characters, dashes and underscores."
 
 -- | Parse a symbol-only identifier.
 --
@@ -109,6 +147,9 @@ parseAlphaNumericId = do
 -- Bind operator.
 -- >>> parse parseSymbolId "" ">>="
 -- Right (Var ">>=")
+--
+-- >>> parse parseSymbolId "" "+3"
+-- Right (Var "+")
 --
 -- >>> isLeft $ parse parseSymbolId "" "!!!"
 -- True
@@ -157,25 +198,57 @@ parseVector = parseListWithSurrounding '[' ']' Vector
 parseListWithSurrounding :: Char -> Char -> ([Exp] -> Exp) -> Parser Exp
 parseListWithSurrounding l r f = do
   _ <- char l
-  exps <- sepBy parseExp spaces
+  exps <- sepBy parseExp (skipMany1 space)
+  -- Must be separated by at least one space
   _ <- char r
   return $ f exps
-
--- parseVec :: Parser [Exp]
 
 -- | Parse expression.
 --
 -- >>> parse parseExp "" "\"abc\""
 -- Right (Literal (StringV "abc"))
 --
+-- >>> parse parseExp "" "f"
+-- Right (Var "f")
+--
+-- >>> parse parseExp "" "x"
+-- Right (Var "x")
+--
+-- >>> parse parseExp "" "[+ -]"
+-- Right (Vector [Var "+",Var "-"])
+--
+-- >>> parse parseExp "" "+ 13"
+-- Right (Var "+")
+--
 parseExp :: Parser Exp
 parseExp = parseString <|> parseBool <|> parseInt <|> parseVar <|> parseList <|> parseVector
+
+-- | Parse a line of expression.
+--
+-- >>> parse parseLine "" "[+ - >>= abc-def 123]"
+-- Right (Vector [Var "+",Var "-",Var ">>=",Var "abc-def",Literal (IntV 123)])
+--
+-- >>> isLeft $ parse parseLine "" "+ 13"
+-- True
+--
+parseLine :: Parser Exp
+parseLine = do
+  expr <- parseExp
+
+  -- Expect spaces and EOF after expression.
+  _ <- many space
+  _ <- eof
+
+  return expr
 
 -- | Parse a Neblen program.
 --
 -- >>> parseProgram "(+ 1 2 3 4)"
 -- Right (List [Var "+",Literal (IntV 1),Literal (IntV 2),Literal (IntV 3),Literal (IntV 4)])
 --
+-- >>> isLeft $ parseProgram "+ 13"
+-- True
 parseProgram :: NeblenProgram -> Either ParseError Exp
-parseProgram = parse parseExp ""
+parseProgram = parse parseLine ""
+
 

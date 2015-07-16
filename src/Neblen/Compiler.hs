@@ -127,7 +127,7 @@ emitExp env (Let var val body) = emitLet env var val body
 emit :: Exp -> JSProgram
 emit = emitExp emptyEnv
 
--- | Compile a Nelbn program to JavaScript.
+-- | Compile a Neblen program to JavaScript.
 --
 -- >>> compile "(+ 1 2 3)"
 -- "[_nbln_plus,1,2,3]"
