@@ -4,19 +4,15 @@ module Neblen.Parser where
 
 import Neblen.Data
 import Text.ParserCombinators.Parsec
+import qualified Control.Applicative as A
 
 -- $setup
 -- >>> :set -XOverloadedStrings
 -- >>> import Data.Either
 
-parseDef :: Parser Exp
-parseDef = do
-  keyword <- try $ string "def"
-  var <- parseVar
-  body <- parseExp
-  case keyword of
-    "def" -> return $ Def var body
-    _     -> unexpected "Not a keyword"
+-- | Skip one or more spaces.
+skipSpaces1 :: Parser ()
+skipSpaces1 = skipMany1 space
 
 -- | Parse string.
 --
@@ -178,39 +174,51 @@ symbolIds = oneOf validIdSymbols
 -- >>> parse parseList "" "()"
 -- Right (List [])
 --
--- >>> parse parseList "" "(xyz-abc \"abc\" 123)"
+-- >>> parse parseList "" "(list xyz-abc \"abc\" 123)"
 -- Right (List [Var "xyz-abc",Literal (StringV "abc"),Literal (IntV 123)])
 --
--- >>> parse parseList "" "(xyz-abc (0 \"foo\" true))"
+-- >>> parse parseList "" "(list xyz-abc (list 0 \"foo\" true))"
 -- Right (List [Var "xyz-abc",List [Literal (IntV 0),Literal (StringV "foo"),Literal (BoolV True)]])
 --
--- >>> parse parseList "" "((0 \"foo\" true))"
+-- >>> parse parseList "" "(list (list 0 \"foo\" true))"
 -- Right (List [List [Literal (IntV 0),Literal (StringV "foo"),Literal (BoolV True)]])
 --
--- >>> parse parseList "" "(def x 123)"
--- Right (Def (Var "x") (Literal (IntV 123)))
+-- >>> isLeft $ parse parseList "" "(def x 123)"
+-- True
 --
--- >>> parse parseList "" "(x 123 y)"
--- FIXME
+-- >>> isLeft $ parse parseList "" "(x 123 y)"
+-- True
 --
--- -- ^ multiple functions calls? Would need to solve Currying here in the AST
--- building?
---
--- >>> parse parseList "" "(fn [x] (+ x 123))"
--- FIXME
+-- >>> isLeft $ parse parseList "" "(fn [x] (+ x 123))"
+-- True
 --
 -- >>> isLeft $ parse parseList "" "(123 456"
 -- True
 --
 parseList :: Parser Exp
-parseList = do
-  list <- parseListWithSurrounding '(' ')' List
-  return $ convertListToWhat list
+parseList = parseEmptyList <|> parseList'
 
--- TODO convert function declarations, function calls.
-convertListToWhat :: Exp -> Exp
-convertListToWhat (List [Var "def", Var v, body]) = Def (Var v) body
-convertListToWhat l = l
+-- | Parse empty list '()'.
+--
+-- >>> parse parseEmptyList "" "()"
+-- Right (List [])
+--
+-- >>> isLeft $ parse parseEmptyList "" "(123)"
+-- True
+--
+parseEmptyList :: Parser Exp
+parseEmptyList = try (string "()") A.*> A.pure (List [])
+
+-- | Parse list with 'list' keyword.
+--
+-- >>> parse parseList' "" "(list)"
+-- Right (List [])
+--
+-- >>> parse parseList' "" "(list   1 abc-xyz \"abc\")"
+-- Right (List [Literal (IntV 1),Var "abc-xyz",Literal (StringV "abc")])
+--
+parseList' :: Parser Exp
+parseList' = try (string "(list)") A.*> A.pure (List []) <|> try (parseListWithSurroundingPrefix (Just (string "list")) '(' ')' List)
 
 -- | Parse vectors.
 --
@@ -223,21 +231,107 @@ convertListToWhat l = l
 parseVector :: Parser Exp
 parseVector = parseListWithSurrounding '[' ']' Vector
 
-parseListWithSurrounding :: Char -> Char -> ([Exp] -> Exp) -> Parser Exp
-parseListWithSurrounding l r f = do
+parseListWithSurroundingPrefix :: Maybe (Parser String) -> Char -> Char -> ([Exp] -> Exp) -> Parser Exp
+parseListWithSurroundingPrefix mp l r f = do
   _ <- char l
+  case mp of
+    Just s -> s A.*> skipSpaces1
+    _      -> spaces
   exps <- sepBy parseExp (skipMany1 space)
   -- Must be separated by at least one space
   _ <- char r
   return $ f exps
+
+parseListWithSurrounding :: Char -> Char -> ([Exp] -> Exp) -> Parser Exp
+parseListWithSurrounding = parseListWithSurroundingPrefix Nothing
+
+-- | Parse definition.
+--
+-- >>> parse parseDef "" "(def x 123)"
+-- Right (Def (Var "x") (Literal (IntV 123)))
+--
+parseDef :: Parser Exp
+parseDef = try $ do
+  _ <- char '('
+  _ <- try $ string "def"
+  skipSpaces1
+  var <- parseVar
+  skipSpaces1
+  body <- parseExp
+  _ <- char ')'
+  return $ Def var body
+
+-- | Parse unary function calls.
+--
+-- >>> parse parseUnaryCall "" "(x 123)"
+-- Right (UnaryCall (Var "x") (Literal (IntV 123)))
+--
+-- Curry (x 1 2) as ((x 1) 2):
+--
+-- >>> parse parseUnaryCall "" "(x 1 2)"
+-- Right (UnaryCall (UnaryCall (Var "x") (Literal (IntV 1))) (Literal (IntV 2)))
+--
+-- >>> parse parseUnaryCall "" "(x 1 2 3)"
+-- Right (UnaryCall (UnaryCall (UnaryCall (Var "x") (Literal (IntV 1))) (Literal (IntV 2))) (Literal (IntV 3)))
+--
+parseUnaryCall :: Parser Exp
+parseUnaryCall = try $ do
+  _ <- char '('
+  varOrFn <- parseVar -- <|> parseFun
+  skipSpaces1
+  args <- many1 parseExp
+  return $ buildCallStack varOrFn args
+
+-- | Convert a function call with multiple arguments to recursive unary calls.
+-- If no arguments are given, return a nullary function call.
+--
+-- >>> buildCallStack (Var "x") []
+-- NullaryCall (Var "x")
+--
+-- >>> buildCallStack (Var "x") [Literal (IntV 1)]
+-- UnaryCall (Var "x") (Literal (IntV 1))
+--
+-- >>> buildCallStack (Var "x") [Literal (IntV 1),Literal (IntV 2),Literal (IntV 3)]
+-- UnaryCall (UnaryCall (UnaryCall (Var "x") (Literal (IntV 1))) (Literal (IntV 2))) (Literal (IntV 3))
+--
+buildCallStack :: Exp -> [Exp] -> Exp
+buildCallStack fn [] = NullaryCall fn
+buildCallStack fn [arg] = UnaryCall fn arg
+buildCallStack fn (a:as) = buildCallStack (UnaryCall fn a) as
+
+-- | Parse nullary function calls. That is, functions with no arguments.
+--
+-- >>> parse parseNullaryCall "" "(+)"
+-- Right (NullaryCall (Var "+"))
+--
+-- >>> parse parseNullaryCall "" "(list)"
+-- Right (NullaryCall (Var "list"))
+--
+-- >>> isLeft $ parse parseNullaryCall "" "()"
+-- True
+--
+parseNullaryCall :: Parser Exp
+parseNullaryCall = do
+  _ <- char '('
+  varOrFn <- parseVar
+  _ <- char ')'
+  return $ NullaryCall varOrFn
+
+-- | Parse functions.
+--
+-- >>> parse parseList "" "(fn [x] (+ x 123))"
+-- FIXME
+--
+parseFun :: Parser Exp
+parseFun = parseList
 
 -- | Parse expression.
 --
 -- >>> parse parseExp "" "\"abc\""
 -- Right (Literal (StringV "abc"))
 --
--- >>> parse parseExp "" "f"
--- Right (Var "f")
+-- >>> parse parseExp "" "true"
+-- Right (Literal (BoolV True))
 --
 -- >>> parse parseExp "" "x"
 -- Right (Var "x")
@@ -245,14 +339,23 @@ parseListWithSurrounding l r f = do
 -- >>> parse parseExp "" "[+ -]"
 -- Right (Vector [Var "+",Var "-"])
 --
+-- >>> parse parseExp "" "(list + - abc)"
+-- Right (List [Var "+",Var "-",Var "abc"])
+--
 -- >>> parse parseExp "" "+ 13"
 -- Right (Var "+")
 --
 -- >>> parse parseExp "" "(def x 123)"
 -- Right (Def (Var "x") (Literal (IntV 123)))
 --
+-- >>> parse parseExp "" "(foo bar)"
+-- Right (UnaryCall (Var "foo") (Var "bar"))
+--
+-- >>> parse parseExp "" "(foo)"
+-- Right (NullaryCall (Var "foo"))
+--
 parseExp :: Parser Exp
-parseExp = parseString <|> parseBool <|> parseInt <|> parseVar <|> parseList <|> parseVector
+parseExp = parseString <|> parseBool <|> parseInt <|> parseVar <|> parseList <|> parseVector <|> parseDef <|> parseUnaryCall <|> parseNullaryCall
 
 -- | Parse a line of expression.
 --
@@ -274,8 +377,8 @@ parseLine = do
 
 -- | Parse a Neblen program.
 --
--- >>> parseProgram "(+ 1 2 3 4)"
--- Right (List [Var "+",Literal (IntV 1),Literal (IntV 2),Literal (IntV 3),Literal (IntV 4)])
+-- >>> parseProgram "(+ 1 2)"
+-- FIXME
 --
 -- >>> isLeft $ parseProgram "+ 13"
 -- True

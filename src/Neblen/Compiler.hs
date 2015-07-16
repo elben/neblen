@@ -75,28 +75,28 @@ emitFunction _ _ _ = error "Invalid function definition."
 -- >>> emitLet emptyEnv (Var "x") (Literal (IntV 55)) (Add (Literal (IntV 3)) (Var "x"))
 -- "(function (_nbln_x) { return (3 + _nbln_x); })(55)"
 --
--- >>> emitLet emptyEnv (Var "incr") (Function (Var "x") (Add (Literal (IntV 1)) (Var "x"))) (Call (Var "incr") (Literal (IntV 10)))
+-- >>> emitLet emptyEnv (Var "incr") (Function (Var "x") (Add (Literal (IntV 1)) (Var "x"))) (UnaryCall (Var "incr") (Literal (IntV 10)))
 -- "(function (_nbln_incr) { return _nbln_incr(10); })((function (_nbln_x) { return (1 + _nbln_x); }))"
 --
 emitLet :: Env -> Exp -> Exp -> Exp -> JSProgram
-emitLet env (Var v) val body = emitCall env (Function (Var v) body) val
+emitLet env (Var v) val body = emitUnaryCall env (Function (Var v) body) val
 emitLet _ _ _ _ = "Invalid let definition."
 
 -- | Emit function call.
 --
 -- Env -> Function or function name -> Argument expression -> JSProgram
 --
-emitCall :: Env -> Exp -> Exp -> JSProgram
-emitCall env (Var fn) expr = xformVar fn ++ "(" ++ emitExp env expr ++ ")"
-emitCall env (Function var body) expr = emitFunction env var body ++ "(" ++ emitExp env expr ++ ")"
-emitCall _ _ _ = error "Invalid function call."
+emitUnaryCall :: Env -> Exp -> Exp -> JSProgram
+emitUnaryCall env (Var fn) expr = xformVar fn ++ "(" ++ emitExp env expr ++ ")"
+emitUnaryCall env (Function var body) expr = emitFunction env var body ++ "(" ++ emitExp env expr ++ ")"
+emitUnaryCall _ _ _ = error "Invalid function call."
 
 -- | Emit vector.
 --
 -- >>> emitVector emptyEnv []
 -- "[]"
 --
--- >>> emitVector emptyEnv [Literal (IntV 1), Literal (IntV 3), (Let (Var "incr") (Function (Var "x") (Add (Literal (IntV 1)) (Var "x"))) (Call (Var "incr") (Literal (IntV 10))))]
+-- >>> emitVector emptyEnv [Literal (IntV 1), Literal (IntV 3), (Let (Var "incr") (Function (Var "x") (Add (Literal (IntV 1)) (Var "x"))) (UnaryCall (Var "incr") (Literal (IntV 10))))]
 -- "[1,3,(function (_nbln_incr) { return _nbln_incr(10); })((function (_nbln_x) { return (1 + _nbln_x); }))]"
 --
 emitVector :: Env -> [Exp] -> JSProgram
@@ -119,7 +119,7 @@ emitExp _ (Var s) = xformVar s
 emitExp env (Def var expr) = emitDef env var expr
 emitExp env (Add left right) = "(" ++ emitExp env left ++ " + " ++ emitExp env right ++ ")"
 emitExp env (Function var expr) = emitFunction env var expr
-emitExp env (Call fun arg) = emitCall env fun arg
+emitExp env (UnaryCall fun arg) = emitUnaryCall env fun arg
 emitExp env (Let var val body) = emitLet env var val body
 
 -- | Emit a JavaScript program.
@@ -130,7 +130,7 @@ emit = emitExp emptyEnv
 -- | Compile a Neblen program to JavaScript.
 --
 -- >>> compile "(+ 1 2 3)"
--- "[_nbln_plus,1,2,3]"
+-- "(1 + 2 + 3)"
 compile :: NeblenProgram -> JSProgram
 compile p = case parseProgram p of
               Right expr -> emit expr

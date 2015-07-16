@@ -18,12 +18,13 @@ data Value = IntV Int
 data Exp = Literal Value
          | List [Exp]
          | Vector [Exp]
-         | Var String       -- ^ Var "x"
-         | Def Exp Exp      -- ^ Def (Var "x") Exp
+         | Var String        -- ^ Var "x"
+         | Def Exp Exp       -- ^ Def (Var "x") Exp
          | Add Exp Exp
-         | Function Exp Exp -- ^ Function (Var "x") Exp
-         | Call Exp Exp     -- ^ Call Function (Argument value)
-         | Let Exp Exp Exp  -- ^ Let (Var "x") (Value of x) Body
+         | Function Exp Exp  -- ^ Function (Var "x") Exp
+         | UnaryCall Exp Exp -- ^ UnaryCall (Function or Var) (Argument value)
+         | NullaryCall Exp   -- ^ NullaryCall (Function or Var)
+         | Let Exp Exp Exp   -- ^ Let (Var "x") (Value of x) Body
   deriving (Show, Eq)
 
 -- | Symbols that can be part of symbol-only identifiers.
