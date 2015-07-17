@@ -3,6 +3,7 @@
 module Neblen.Data where
 
 import qualified Data.Map.Strict as MS
+import qualified Data.Set as S
 
 type NeblenProgram = String
 
@@ -43,4 +44,7 @@ symbolToJsId = MS.fromList [
   ('-', "minus"),
   ('+', "plus"),
   ('/', "div")]
+
+reservedIds :: S.Set String
+reservedIds = S.fromList ["def", "fn"]
 

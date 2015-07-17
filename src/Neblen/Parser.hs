@@ -5,6 +5,7 @@ module Neblen.Parser where
 import Neblen.Data
 import Text.ParserCombinators.Parsec
 import qualified Control.Applicative as A
+import qualified Data.Set as S
 
 -- $setup
 -- >>> :set -XOverloadedStrings
@@ -89,19 +90,26 @@ parseInt = do
 -- >>> isLeft $ parse parseVar "" "_"
 -- True
 --
+-- >>> isLeft $ parse parseVar "" "fn"
+-- True
+--
 parseVar :: Parser Exp
-parseVar = try parseAlphaNumericId <|> parseSymbolId
+parseVar = do
+  i <- try parseAlphaNumericId <|> parseSymbolId
+  if S.member i reservedIds
+    then unexpected $ "reserved identifier '" ++ i ++ "'"
+    else return $ Var i
 
 -- | Parse an alpha-numeric identifier.
 --
 -- >>> parse parseAlphaNumericId "" "abc"
--- Right (Var "abc")
+-- Right "abc"
 --
 -- >>> parse parseAlphaNumericId "" "_abc"
--- Right (Var "_abc")
+-- Right "_abc"
 --
 -- >>> parse parseAlphaNumericId "" "-abc_def-123-"
--- Right (Var "-abc_def-123-")
+-- Right "-abc_def-123-"
 --
 -- >>> isLeft $ parse parseAlphaNumericId "" "-"
 -- True
@@ -115,7 +123,7 @@ parseVar = try parseAlphaNumericId <|> parseSymbolId
 -- >>> isLeft $ parse parseAlphaNumericId "" "123abc"
 -- True
 --
-parseAlphaNumericId :: Parser Exp
+parseAlphaNumericId :: Parser String
 parseAlphaNumericId = do
   -- Get first character.
   p <- letter <|> char '-' <|> char '_'
@@ -130,10 +138,10 @@ parseAlphaNumericId = do
     then (do
       p' <- letter
       rest <- restOfAlphaNumericId
-      return $ Var (p : p' : rest))
+      return (p : p' : rest))
     else (do
       rest <- restOfAlphaNumericId
-      return $ Var (p : rest))
+      return (p : rest))
 
 restOfAlphaNumericId :: Parser String
 restOfAlphaNumericId = many (alphaNum <|> char '-' <|> char '_') <?> "Non-symbolic identifier must consist of alphanumeric characters, dashes and underscores."
@@ -141,29 +149,26 @@ restOfAlphaNumericId = many (alphaNum <|> char '-' <|> char '_') <?> "Non-symbol
 -- | Parse a symbol-only identifier.
 --
 -- >>> parse parseSymbolId "" ">= abc"
--- Right (Var ">=")
+-- Right ">="
 --
 -- >>> parse parseSymbolId "" "+"
--- Right (Var "+")
+-- Right "+"
 --
 -- >>> parse parseSymbolId "" "+++++"
--- Right (Var "+++++")
+-- Right "+++++"
 --
 -- Bind operator.
 -- >>> parse parseSymbolId "" ">>="
--- Right (Var ">>=")
+-- Right ">>="
 --
 -- >>> parse parseSymbolId "" "+3"
--- Right (Var "+")
+-- Right "+"
 --
 -- >>> isLeft $ parse parseSymbolId "" "!!!"
 -- True
 --
-parseSymbolId :: Parser Exp
-parseSymbolId = do
-  -- ID must be one or more symbols
-  s <- many1 symbolIds
-  return $ Var s
+parseSymbolId :: Parser String
+parseSymbolId = many1 symbolIds -- ID must be one or more symbols
 
 -- | Symbols that can be part of symbol-only identifiers.
 symbolIds :: Parser Char
@@ -277,8 +282,8 @@ parseDef = try $ do
 -- >>> parse parseUnaryCall "" "(x 1 2 3)"
 -- Right (UnaryCall (UnaryCall (UnaryCall (Var "x") (Literal (IntV 1))) (Literal (IntV 2))) (Literal (IntV 3)))
 --
--- >>> parse parseUnaryCall "" "((fn [x] (+ x 1)) 1 2 3)"
--- TODO
+-- >>> parse parseUnaryCall "" "((fn [x y z] (+ x y)) 1 2 3)"
+-- Right (UnaryCall (UnaryCall (UnaryCall (Function (Var "x") (Function (Var "y") (Function (Var "z") (UnaryCall (UnaryCall (Var "+") (Var "x")) (Var "y"))))) (Literal (IntV 1))) (Literal (IntV 2))) (Literal (IntV 3)))
 --
 parseUnaryCall :: Parser Exp
 parseUnaryCall = try $ do
@@ -396,7 +401,17 @@ parseVecOfVars = do
 -- Right (NullaryCall (Var "foo"))
 --
 parseExp :: Parser Exp
-parseExp = parseString <|> parseBool <|> parseInt <|> parseVar <|> parseList <|> parseVector <|> parseDef <|> parseUnaryCall <|> parseNullaryCall <|> parseFun
+parseExp =
+  try parseString <|>
+  try parseBool <|>
+  try parseInt <|>
+  try parseList <|>
+  try parseVector <|>
+  try parseDef <|>
+  try parseUnaryCall <|>
+  try parseNullaryCall <|>
+  try parseFun <|>
+  try parseVar
 
 -- | Parse a line of expression.
 --
@@ -422,6 +437,7 @@ parseLine = do
 -- Right (UnaryCall (UnaryCall (Var "+") (Literal (IntV 1))) (Literal (IntV 2)))
 --
 -- >>> parseProgram "(fn [x] x)"
+-- Right (Function (Var "x") (Var "x"))
 --
 -- >>> isLeft $ parseProgram "+ 13"
 -- True
