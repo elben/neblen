@@ -26,7 +26,8 @@ data Exp = Literal Value
          | Function Exp Exp  -- ^ Function (Var "x") Exp
          | UnaryCall Exp Exp -- ^ UnaryCall (Function or Var) (Argument value)
          | NullaryCall Exp   -- ^ NullaryCall (Function or Var)
-         | Let Exp Exp Exp   -- ^ Let (Var "x") (Value of x) Body
+         | Let Exp Exp Exp   -- ^ Let (Var "x") (Value of x) Body.
+        -- ^ TODO: Convert let to macro that uses function.
   deriving (Show, Eq)
 
 -- | Symbols that can be part of symbol-only identifiers.
@@ -46,5 +47,5 @@ symbolToJsId = MS.fromList [
   ('/', "div")]
 
 reservedIds :: S.Set String
-reservedIds = S.fromList ["def", "fn"]
+reservedIds = S.fromList ["def", "fn", "let"]
 

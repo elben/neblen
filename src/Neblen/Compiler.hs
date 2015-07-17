@@ -41,6 +41,8 @@ emitValue (StringV s) = "\"" ++ s ++ "\""
 -- >>> xformVar "hello"
 -- "_nbln_hello"
 --
+-- TODO: need to make sure vars CAN'T smash other vars with the same name
+-- but different scope. I think since we use javascript 'var' this is solved?
 xformVar :: String -> JSProgram
 xformVar v = "_nbln_" ++ v'
   where v' = L.intercalate "" (fmap (\c -> MS.findWithDefault [c] c symbolToJsId) v)

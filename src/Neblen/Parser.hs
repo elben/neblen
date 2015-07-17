@@ -339,15 +339,23 @@ parseNullaryCall = do
 --
 parseFun :: Parser Exp
 parseFun = do
-  _ <- char '('
-  _ <- try $ string "fn"
-  _ <- skipSpaces1
+  parseStartsListWith "fn"
   argsVec <- parseVecOfVars
+  body <- parseBodyOfFunction
+  return $ buildFunctionCurry body argsVec
+
+parseStartsListWith :: String -> Parser ()
+parseStartsListWith keyword = do
+  _ <- char '('
+  _ <- try $ string keyword
+  skipSpaces1
+
+parseBodyOfFunction :: Parser Exp
+parseBodyOfFunction = do
   _ <- skipSpaces1
   body <- parseExp
   _ <- char ')'
-
-  return $ buildFunctionCurry body argsVec
+  return body
 
 buildFunctionCurry :: Exp -> [Exp] -> Exp
 buildFunctionCurry body [] = NullaryFun body
@@ -370,6 +378,54 @@ parseVecOfVars = do
   _ <- char ']'
   return vars
 
+-- | Parse let expressions.
+--
+-- >>> parse parseLet "" "(let [x 1 y 2] (+ x y))"
+-- Right (Let (Var "x") (Literal (IntV 1)) (Let (Var "y") (Literal (IntV 2)) (UnaryCall (UnaryCall (Var "+") (Var "x")) (Var "y"))))
+--
+-- >>> isLeft $ parse parseLet "" "(let [] (+ x y))"
+-- True
+--
+-- >>> isLeft $ parse parseLet "" "(let [x 1 y] (+ x y))"
+-- True
+--
+parseLet :: Parser Exp
+parseLet = do
+  parseStartsListWith "let"
+  bindings <- parseVarExpPairs
+  body <- parseBodyOfFunction
+  return $ buildLetBindingStack body bindings
+
+buildLetBindingStack :: Exp -> [(Exp, Exp)] -> Exp
+buildLetBindingStack _ [] = error "let must bind variables"
+buildLetBindingStack body [(Var v,bind)] = Let (Var v) bind body
+buildLetBindingStack body ((Var v,bind):bindings) = Let (Var v) bind (buildLetBindingStack body bindings)
+buildLetBindingStack _ _ = error "let has invalid bindings"
+
+-- | Parse (var, exp) pairs. Must have at least one.
+--
+-- >>> parse parseVarExpPairs "" "[x 1 y 2]"
+-- Right [(Var "x",Literal (IntV 1)),(Var "y",Literal (IntV 2))]
+--
+-- >>> isLeft $ parse parseLet "" "[]"
+-- True
+--
+-- >>> isLeft $ parse parseLet "" "[x 1 y]"
+-- True
+--
+parseVarExpPairs :: Parser [(Exp, Exp)]
+parseVarExpPairs = do
+  _ <- char '['
+  pairs <- sepBy1 parseVarExpPair skipSpaces1
+  _ <- char ']'
+  return pairs
+
+parseVarExpPair :: Parser (Exp, Exp)
+parseVarExpPair = do
+  var <- parseVar
+  _ <- skipSpaces1
+  body <- parseExp
+  return (var, body)
 
 -- | Parse expression.
 --
@@ -378,6 +434,9 @@ parseVecOfVars = do
 --
 -- >>> parse parseExp "" "true"
 -- Right (Literal (BoolV True))
+--
+-- >>> parse parseExp "" "123"
+-- Right (Literal (IntV 123))
 --
 -- >>> parse parseExp "" "x"
 -- Right (Var "x")
@@ -400,6 +459,9 @@ parseVecOfVars = do
 -- >>> parse parseExp "" "(foo)"
 -- Right (NullaryCall (Var "foo"))
 --
+-- >>> parse parseExp "" "(let [x 1 y 2] (+ x y))"
+-- Right (Let (Var "x") (Literal (IntV 1)) (Let (Var "y") (Literal (IntV 2)) (UnaryCall (UnaryCall (Var "+") (Var "x")) (Var "y"))))
+--
 parseExp :: Parser Exp
 parseExp =
   try parseString <|>
@@ -411,6 +473,7 @@ parseExp =
   try parseUnaryCall <|>
   try parseNullaryCall <|>
   try parseFun <|>
+  try parseLet <|>
   try parseVar
 
 -- | Parse a line of expression.
