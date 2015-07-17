@@ -49,3 +49,9 @@ symbolToJsId = MS.fromList [
 reservedIds :: S.Set String
 reservedIds = S.fromList ["def", "fn", "let"]
 
+standardFunctions :: MS.Map String JSProgram
+standardFunctions = MS.fromList [
+  ("_nbln_plus", "function(x) { return function(y) { return x + y; }; };"),
+  ("_nbln_minus", "function(x) { return function(y) { return x - y; }; };"),
+  ("_nbln_mult", "function(x) { return function(y) { return x * y; }; };")]
+

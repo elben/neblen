@@ -109,7 +109,7 @@ emitNullaryCall env expr = emitExp env expr ++ "()"
 emitUnaryCall :: Env -> Exp -> Exp -> JSProgram
 emitUnaryCall env (Var fn) arg = xformVar fn ++ "(" ++ emitExp env arg ++ ")"
 emitUnaryCall env (Function var body) arg = emitFunction env var body ++ "(" ++ emitExp env arg ++ ")"
-emitUnaryCall env expr arg = (emitExp env expr) ++ "(" ++ emitExp env arg ++ ")"
+emitUnaryCall env expr arg = emitExp env expr ++ "(" ++ emitExp env arg ++ ")"
 
 -- | Emit vector.
 --
@@ -144,17 +144,29 @@ emitExp env (UnaryCall fun arg) = emitUnaryCall env fun arg
 emitExp env (NullaryCall fun) = emitNullaryCall env fun
 emitExp env (Let var val body) = emitLet env var val body
 
+-- | The standard library program.
+--
+standardLib :: JSProgram
+standardLib = (MS.foldlWithKey (\js fn body -> js ++ "\nvar " ++ fn ++ "=" ++ body) "" standardFunctions) ++ "\n\n"
+
 -- | Emit a JavaScript program.
 --
 emit :: Exp -> JSProgram
 emit = emitExp emptyEnv
 
--- | Compile a Neblen program to JavaScript.
+-- | Compile a line of Neblen to JavaScript.
 --
--- >>> compile "(foo 1 (fn [x] x) [1 2] (list 4))"
+-- >>> compileLine "(foo 1 (fn [x] x) [1 2] (list 4))"
 -- "_nbln_foo(1)((function (_nbln_x) { return _nbln_x; }))([1,2])([4])"
 --
+-- >>> compileLine "(+ 1 2)"
+--
+compileLine :: NeblenProgram -> JSProgram
+compileLine p = case parseProgram p of
+                  Right expr -> emit expr
+                  Left err -> show err
+
+-- | Compile a Neblen program to JavaScript. Includes standard library.
+--
 compile :: NeblenProgram -> JSProgram
-compile p = case parseProgram p of
-              Right expr -> emit expr
-              Left err -> show err
+compile p = standardLib ++ compileLine p
