@@ -231,13 +231,16 @@ parseList' = try (string "(list)") A.*> A.pure (List []) <|> try (parseListWithS
 parseVector :: Parser Exp
 parseVector = parseListWithSurrounding '[' ']' Vector
 
+parseExps :: Parser [Exp]
+parseExps = sepBy parseExp skipSpaces1
+
 parseListWithSurroundingPrefix :: Maybe (Parser String) -> Char -> Char -> ([Exp] -> Exp) -> Parser Exp
 parseListWithSurroundingPrefix mp l r f = do
   _ <- char l
   case mp of
     Just s -> s A.*> skipSpaces1
     _      -> spaces
-  exps <- sepBy parseExp (skipMany1 space)
+  exps <- parseExps
   -- Must be separated by at least one space
   _ <- char r
   return $ f exps
@@ -274,12 +277,16 @@ parseDef = try $ do
 -- >>> parse parseUnaryCall "" "(x 1 2 3)"
 -- Right (UnaryCall (UnaryCall (UnaryCall (Var "x") (Literal (IntV 1))) (Literal (IntV 2))) (Literal (IntV 3)))
 --
+-- >>> parse parseUnaryCall "" "((fn [x] (+ x 1)) 1 2 3)"
+-- TODO
+--
 parseUnaryCall :: Parser Exp
 parseUnaryCall = try $ do
   _ <- char '('
-  varOrFn <- parseVar -- <|> parseFun
+  varOrFn <- parseVar <|> parseFun
   skipSpaces1
-  args <- many1 parseExp
+  args <- parseExps
+  _ <- char ')'
   return $ buildCallStack varOrFn args
 
 -- | Convert a function call with multiple arguments to recursive unary calls.
@@ -319,11 +326,45 @@ parseNullaryCall = do
 
 -- | Parse functions.
 --
--- >>> parse parseList "" "(fn [x] (+ x 123))"
--- FIXME
+-- >>> parse parseFun "" "(fn [x] (+ x 123))"
+-- Right (Function (Var "x") (UnaryCall (UnaryCall (Var "+") (Var "x")) (Literal (IntV 123))))
+--
+-- >>> parse parseFun "" "(fn [x y z] (x y z))"
+-- Right (Function (Var "x") (Function (Var "y") (Function (Var "z") (UnaryCall (UnaryCall (Var "x") (Var "y")) (Var "z")))))
 --
 parseFun :: Parser Exp
-parseFun = parseList
+parseFun = do
+  _ <- char '('
+  _ <- try $ string "fn"
+  _ <- skipSpaces1
+  argsVec <- parseVecOfVars
+  _ <- skipSpaces1
+  body <- parseExp
+  _ <- char ')'
+
+  return $ buildFunctionCurry body argsVec
+
+buildFunctionCurry :: Exp -> [Exp] -> Exp
+buildFunctionCurry body [] = NullaryFun body
+buildFunctionCurry body [Var v] = Function (Var v) body
+buildFunctionCurry body (Var v:as) = Function (Var v) (buildFunctionCurry body as)
+buildFunctionCurry _ _ = error "Invalid function argument list."
+
+-- | Parse vector of vars.
+--
+-- >>> parse parseVecOfVars "" "[]"
+-- Right []
+--
+-- >>> parse parseVecOfVars "" "[x y z]"
+-- Right [Var "x",Var "y",Var "z"]
+--
+parseVecOfVars :: Parser [Exp]
+parseVecOfVars = do
+  _ <- char '['
+  vars <- sepBy parseVar skipSpaces1
+  _ <- char ']'
+  return vars
+
 
 -- | Parse expression.
 --
@@ -355,7 +396,7 @@ parseFun = parseList
 -- Right (NullaryCall (Var "foo"))
 --
 parseExp :: Parser Exp
-parseExp = parseString <|> parseBool <|> parseInt <|> parseVar <|> parseList <|> parseVector <|> parseDef <|> parseUnaryCall <|> parseNullaryCall
+parseExp = parseString <|> parseBool <|> parseInt <|> parseVar <|> parseList <|> parseVector <|> parseDef <|> parseUnaryCall <|> parseNullaryCall <|> parseFun
 
 -- | Parse a line of expression.
 --
@@ -378,7 +419,9 @@ parseLine = do
 -- | Parse a Neblen program.
 --
 -- >>> parseProgram "(+ 1 2)"
--- FIXME
+-- Right (UnaryCall (UnaryCall (Var "+") (Literal (IntV 1))) (Literal (IntV 2)))
+--
+-- >>> parseProgram "(fn [x] x)"
 --
 -- >>> isLeft $ parseProgram "+ 13"
 -- True

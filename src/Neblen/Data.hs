@@ -21,6 +21,7 @@ data Exp = Literal Value
          | Var String        -- ^ Var "x"
          | Def Exp Exp       -- ^ Def (Var "x") Exp
          | Add Exp Exp
+         | NullaryFun Exp    -- ^ Function (Var "x") Exp
          | Function Exp Exp  -- ^ Function (Var "x") Exp
          | UnaryCall Exp Exp -- ^ UnaryCall (Function or Var) (Argument value)
          | NullaryCall Exp   -- ^ NullaryCall (Function or Var)
