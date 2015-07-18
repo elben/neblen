@@ -12,3 +12,13 @@ cabal install --only-dep
 ```
 doctest -isrc -Wall -fno-warn-type-defaults -fno-warn-unused-do-bind src/Neblen/Parser.hs
 ```
+
+# References
+
+[Write You a Haskell by Stephen Diehl](http://dev.stephendiehl.com/fun)
+
+[Types and Programming Languages by Benjamin C. Pierce](https://mitpress.mit.edu/books/types-and-programming-languages)
+
+[Anatomy of Programming Languages by William R. Cook](http://www.cs.utexas.edu/~wcook/anatomy/anatomy.htm)
+
+[The Typed Racket Guide](http://docs.racket-lang.org/ts-guide/)

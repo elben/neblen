@@ -2,14 +2,16 @@
 
 module Neblen.Data where
 
-import qualified Data.Map.Strict as MS
+import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
 type NeblenProgram = String
 
 type JSProgram = String
 
-type Env = MS.Map String Value
+type Env = M.Map String Value
+
+type Name = String
 
 data Value = IntV Int
            | BoolV Bool
@@ -19,10 +21,10 @@ data Value = IntV Int
 data Exp = Literal Value
          | List [Exp]
          | Vector [Exp]
-         | Var String        -- ^ Var "x"
+         | Var Name          -- ^ Var "x"
          | Def Exp Exp       -- ^ Def (Var "x") Exp
          | Add Exp Exp
-         | NullaryFun Exp    -- ^ Function (Var "x") Exp
+         | NullaryFun Exp    -- ^ Function Exp
          | Function Exp Exp  -- ^ Function (Var "x") Exp
          | UnaryCall Exp Exp -- ^ UnaryCall (Function or Var) (Argument value)
          | NullaryCall Exp   -- ^ NullaryCall (Function or Var)
@@ -34,8 +36,8 @@ data Exp = Literal Value
 validIdSymbols :: String
 validIdSymbols = "<>=%^*-+/"
 
-symbolToJsId :: MS.Map Char String
-symbolToJsId = MS.fromList [
+symbolToJsId :: M.Map Char String
+symbolToJsId = M.fromList [
   ('<', "lt"),
   ('>', "gt"),
   ('=', "eq"),
@@ -49,8 +51,8 @@ symbolToJsId = MS.fromList [
 reservedIds :: S.Set String
 reservedIds = S.fromList ["def", "fn", "let"]
 
-standardFunctions :: MS.Map String JSProgram
-standardFunctions = MS.fromList [
+standardFunctions :: M.Map String JSProgram
+standardFunctions = M.fromList [
   -- first-or, rest, rest-or
   ("_nbln_firstminusor", "function(list) { return function(or) { if (list.length === 0) { return or; } else { return list[0]; }; }; };"),
   ("_nbln_rest", "function(list) { if (list.length === 0) { return []; } else { return list.slice(1,list.length); }; };"),

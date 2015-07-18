@@ -4,7 +4,7 @@ module Neblen.Compiler where
 
 import Neblen.Data
 import Neblen.Parser
-import qualified Data.Map.Strict as MS
+import qualified Data.Map.Strict as M
 import qualified Data.List as L
 
 -- $setup
@@ -13,7 +13,7 @@ import qualified Data.List as L
 --
 
 emptyEnv :: Env
-emptyEnv = MS.empty
+emptyEnv = M.empty
 
 -- | Emit Value.
 --
@@ -46,9 +46,9 @@ emitValue (StringV s) = "\"" ++ s ++ "\""
 --
 -- TODO: need to make sure vars CAN'T smash other vars with the same name
 -- but different scope. I think since we use javascript 'var' this is solved?
-xformVar :: String -> JSProgram
+xformVar :: Name -> JSProgram
 xformVar v = "_nbln_" ++ v'
-  where v' = L.intercalate "" (fmap (\c -> MS.findWithDefault [c] c symbolToJsId) v)
+  where v' = L.intercalate "" (fmap (\c -> M.findWithDefault [c] c symbolToJsId) v)
 
 -- | Emit definition binding.
 --
@@ -150,7 +150,7 @@ emitExp env (Let var val body) = emitLet env var val body
 -- | The standard library program.
 --
 standardLib :: JSProgram
-standardLib = MS.foldlWithKey (\js fn body -> js ++ "\nvar " ++ fn ++ "=" ++ body) "" standardFunctions ++ "\n\n"
+standardLib = M.foldlWithKey (\js fn body -> js ++ "\nvar " ++ fn ++ "=" ++ body) "" standardFunctions ++ "\n\n"
 
 -- | Emit a JavaScript program.
 --
