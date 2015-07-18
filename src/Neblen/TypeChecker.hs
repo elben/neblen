@@ -45,6 +45,37 @@ isFree _ = False
 isBound :: Type -> Bool
 isBound = not . isFree
 
+-- | Bind free type variables to the given type.
+--
+-- >>> bindFreeTo "x" TInt (TVar "x")
+-- TInt
+--
+-- >>> bindFreeTo "x" TInt (TVar "y")
+-- TVar "y"
+--
+-- >>> bindFreeTo "x" TInt (TFun (TVar "x") (TVar "y"))
+-- TFun TInt (TVar "y")
+--
+-- >>> bindFreeTo "x" TInt (TList (TVar "x"))
+-- TList TInt
+--
+-- >>> bindFreeTo "x" TInt (TList (TVar "y"))
+-- TList (TVar "y")
+--
+-- >>> bindFreeTo "x" TInt (TVec (TVar "x"))
+-- TVec TInt
+--
+bindFreeTo :: Name -> Type -> Type -> Type
+bindFreeTo name t (TVar n) = if name == n then t else (TVar n)
+bindFreeTo name t (TFun a b) = TFun (bindFreeTo name t a) (bindFreeTo name t b)
+bindFreeTo name t (TList t') = TList (bindFreeTo name t t')
+bindFreeTo name t (TVec t') = TVec (bindFreeTo name t t')
+bindFreeTo _ _ t = t
+
+typeVarName :: Type -> Name
+typeVarName (TVar n) = n
+typeVarName _ = error "Invalid call."
+
 -- $setup
 -- >>> :set -XOverloadedStrings
 -- >>> import qualified Data.Map.Strict as M
@@ -195,8 +226,8 @@ checkExp env (NullaryCall (NullaryFun body)) = checkExp env (NullaryFun body)
 -- >>> checkExp (M.fromList [("x",TFun TBool TInt)]) (UnaryCall (Var "x") (Literal (IntV 0)))
 -- *** Exception: type mismatch: expecting TBool but got TInt
 --
-checkExp env (UnaryCall (Var fn) arg) =
-  let (_, fnT) = checkExp env (Var fn)
+checkExp env (UnaryCall fn arg) =
+  let (_, fnT) = checkExp env fn
   in case fnT of
        (TFun a b) ->
          let (_, argT) = checkExp env arg
@@ -210,6 +241,11 @@ checkExp env (UnaryCall (Var fn) arg) =
             -- ((-> a a) Int) => ((-> Int Int) Int) => Int
             then (env, argT)
 
+            else if isFree a && isBound argT
+            -- If a is free and arg is bound, bound a to that type:
+            -- ((-> a (-> b a)) Int) => ((-> Int (-> b Int)) Int) => (-> b Int)
+            then let b' = bindFreeTo (typeVarName a) argT b in (env, b')
+
             -- Else, return b whether free or bound:
             --
             -- ((-> a b) Int) => ((-> Int b) Int) => b
@@ -222,24 +258,17 @@ checkExp env (UnaryCall (Var fn) arg) =
 -- >>> checkExp emptyTEnv (UnaryCall (Function (Var "x") (Var "x")) (Literal (IntV 0)))
 -- (fromList [],TInt)
 --
+-- ((fn [x] (fn [y] x)) 0)
+-- (fn [x] (fn [y] x)) : (-> x (-> y x))
+--
+--
 -- Below is: ((fn [x] (fn [y] x)) 0)
 -- >>> checkExp emptyTEnv (UnaryCall (Function (Var "x") (Function (Var "y") (Var "x"))) (Literal (IntV 0)))
 -- (fromList [],TFun (TVar "y") TInt)
 --
 -- Below is: ((fn [x] (fn [y] x)) 0 True)
 -- >>> checkExp emptyTEnv (UnaryCall (UnaryCall (Function (Var "x") (Function (Var "y") (Var "x"))) (Literal (IntV 0))) (Literal (BoolV True)))
--- (fromList [],TFun (TVar "y") TInt)
---
-checkExp env (UnaryCall (Function (Var v) body) arg) =
-  let (env', argT) = checkExp env arg  -- Find argument body's type
-      env'' = insertEnv env' v argT    -- Bind argument var's type to above
-      (_, bodyT) = checkExp env'' body -- Check function body's type with new env
-  in (env, bodyT)
--- checkExp env (UnaryCall expr arg) =
---   let (env', exprT) = checkExp env expr
---   in case exprT of
---        TFun a b -> _
---        _ -> error "calling a non-function"
+-- (fromList [],TInt)
 
 -- TODO how to deal with a free var where there is no function argument name to
 -- use as the variable name.
