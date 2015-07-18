@@ -41,6 +41,9 @@ emitValue (StringV s) = "\"" ++ s ++ "\""
 -- >>> xformVar "hello"
 -- "_nbln_hello"
 --
+-- >>> xformVar "hello-world"
+-- "_nbln_hellominusworld"
+--
 -- TODO: need to make sure vars CAN'T smash other vars with the same name
 -- but different scope. I think since we use javascript 'var' this is solved?
 xformVar :: String -> JSProgram
@@ -147,7 +150,7 @@ emitExp env (Let var val body) = emitLet env var val body
 -- | The standard library program.
 --
 standardLib :: JSProgram
-standardLib = (MS.foldlWithKey (\js fn body -> js ++ "\nvar " ++ fn ++ "=" ++ body) "" standardFunctions) ++ "\n\n"
+standardLib = MS.foldlWithKey (\js fn body -> js ++ "\nvar " ++ fn ++ "=" ++ body) "" standardFunctions ++ "\n\n"
 
 -- | Emit a JavaScript program.
 --
@@ -158,8 +161,6 @@ emit = emitExp emptyEnv
 --
 -- >>> compileLine "(foo 1 (fn [x] x) [1 2] (list 4))"
 -- "_nbln_foo(1)((function (_nbln_x) { return _nbln_x; }))([1,2])([4])"
---
--- >>> compileLine "(+ 1 2)"
 --
 compileLine :: NeblenProgram -> JSProgram
 compileLine p = case parseProgram p of
