@@ -47,30 +47,30 @@ isBound = not . isFree
 
 -- | Bind free type variables to the given type.
 --
--- >>> bindFreeTo "x" TInt (TVar "x")
+-- >>> bindFree "x" TInt (TVar "x")
 -- TInt
 --
--- >>> bindFreeTo "x" TInt (TVar "y")
+-- >>> bindFree "x" TInt (TVar "y")
 -- TVar "y"
 --
--- >>> bindFreeTo "x" TInt (TFun (TVar "x") (TVar "y"))
+-- >>> bindFree "x" TInt (TFun (TVar "x") (TVar "y"))
 -- TFun TInt (TVar "y")
 --
--- >>> bindFreeTo "x" TInt (TList (TVar "x"))
+-- >>> bindFree "x" TInt (TList (TVar "x"))
 -- TList TInt
 --
--- >>> bindFreeTo "x" TInt (TList (TVar "y"))
+-- >>> bindFree "x" TInt (TList (TVar "y"))
 -- TList (TVar "y")
 --
--- >>> bindFreeTo "x" TInt (TVec (TVar "x"))
+-- >>> bindFree "x" TInt (TVec (TVar "x"))
 -- TVec TInt
 --
-bindFreeTo :: Name -> Type -> Type -> Type
-bindFreeTo name t (TVar n) = if name == n then t else TVar n
-bindFreeTo name t (TFun a b) = TFun (bindFreeTo name t a) (bindFreeTo name t b)
-bindFreeTo name t (TList t') = TList (bindFreeTo name t t')
-bindFreeTo name t (TVec t') = TVec (bindFreeTo name t t')
-bindFreeTo _ _ t = t
+bindFree :: Name -> Type -> Type -> Type
+bindFree name t (TVar n) = if name == n then t else TVar n
+bindFree name t (TFun a b) = TFun (bindFree name t a) (bindFree name t b)
+bindFree name t (TList t') = TList (bindFree name t t')
+bindFree name t (TVec t') = TVec (bindFree name t t')
+bindFree _ _ t = t
 
 typeVarName :: Type -> Name
 typeVarName (TVar n) = n
@@ -273,7 +273,7 @@ checkUnaryCall env (UnaryCall fn arg) =
             else if isFree a && isBound argT
             -- If a is free and arg is bound, bound a to that type:
             -- ((-> a (-> b a)) Int) => ((-> Int (-> b Int)) Int) => (-> b Int)
-            then let b' = bindFreeTo (typeVarName a) argT b in (env, b')
+            then let b' = bindFree (typeVarName a) argT b in (env, b')
 
             -- Else, return b whether free or bound:
             --
