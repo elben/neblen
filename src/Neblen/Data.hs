@@ -29,6 +29,7 @@ data Exp = Literal Value
          | UnaryCall Exp Exp -- ^ UnaryCall (Function or Var) (Argument value)
          | NullaryCall Exp   -- ^ NullaryCall (Function or Var)
          | Let Exp Exp Exp   -- ^ Let (Var "x") (Value of x) Body.
+         | If Exp Exp Exp    -- ^ If (Predicate : Bool) (Then clause) (Else clause)
         -- ^ TODO: Convert let to macro that uses function.
   deriving (Show, Eq)
 

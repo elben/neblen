@@ -126,6 +126,15 @@ emitVector :: Env -> [Exp] -> JSProgram
 emitVector _ [] = "[]"
 emitVector env exprs = "[" ++ L.intercalate "," (map (emitExp env) exprs) ++ "]"
 
+-- | Emit if.
+--
+-- >>> emitIf emptyEnv (If (Literal (BoolV True)) (Literal (IntV 1)) (Literal (IntV 2)))
+-- "if (true) { return 1; } else { return 2; }"
+--
+emitIf :: Env -> Exp -> JSProgram
+emitIf env (If p t e) = "if (" ++ emitExp env p ++ ") { return " ++ emitExp env t ++ "; } else { return " ++ emitExp env e ++ "; }"
+emitIf _ _ = error "Invalid if statement."
+
 -- | Emit expression.
 --
 -- >>> emitExp emptyEnv (Var "x")
@@ -146,6 +155,7 @@ emitExp env (Function var expr) = emitFunction env var expr
 emitExp env (UnaryCall fun arg) = emitUnaryCall env fun arg
 emitExp env (NullaryCall fun) = emitNullaryCall env fun
 emitExp env (Let var val body) = emitLet env var val body
+emitExp env e@(If {}) = emitIf env e
 
 -- | The standard library program.
 --

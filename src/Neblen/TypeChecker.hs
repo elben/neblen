@@ -305,6 +305,30 @@ checkList _ _ = error "wrong type"
 checkVector :: TEnv -> Exp -> (TEnv, Type)
 checkVector = checkList
 
+-- | Check if.
+--
+-- Below is: (if ((fn [x] true) 0) "truth" "false") : String
+-- >>> checkIf emptyTEnv (If (UnaryCall (Function (Var "x") (Literal (BoolV True))) (Literal (IntV 0))) (Literal (StringV "then clause")) (Literal (StringV "else clause")))
+-- (fromList [],TString)
+--
+-- Below is: (if false 0 false)
+-- >>> checkIf emptyTEnv (If (Literal (BoolV False)) (Literal (IntV 0)) (Literal (BoolV False)))
+-- *** Exception: then and else clause type mismatch: TInt and TBool found
+--
+checkIf :: TEnv -> Exp -> (TEnv, Type)
+checkIf env (If p t e) =
+  let (_, pT) = checkExp env p
+  in case pT of
+       TBool ->
+         let (_, tT) = checkExp env t
+             (_, eT) = checkExp env e
+         in if (tT == eT)
+            then (env, eT)
+            else error $ "then and else clause type mismatch: " ++ show tT ++ " and " ++ show eT ++ " found"
+       _     ->
+         error "predicate must be a boolean"
+checkIf _ _ = error "wrong type"
+
 -- | Type check expression.
 --
 -- -- TODO: Convert to monad transformer so that TEnv is passed along
@@ -321,6 +345,9 @@ checkVector = checkList
 -- >>> checkExp emptyTEnv (Function (Var "x") (Var "x"))
 -- (fromList [],TFun (TVar "x") (TVar "x"))
 --
+-- >>> checkExp emptyTEnv (If (Literal (BoolV False)) (Literal (IntV 0)) (Literal (IntV 0)))
+-- (fromList [],TInt)
+--
 checkExp :: TEnv -> Exp -> (TEnv, Type)
 checkExp env (Literal lit) = checkLiteral env (Literal lit)
 checkExp env (Var v) = checkVar env (Var v)
@@ -331,6 +358,7 @@ checkExp env e@(NullaryCall {}) = checkNullCall env e
 checkExp env e@(UnaryCall {}) = checkUnaryCall env e
 checkExp env e@(List {}) = checkList env e
 checkExp env e@(Vector {}) = checkVector env e
+checkExp env e@(If {}) = checkIf env e
 checkExp _ (Def {}) = error "TODO"
 checkExp _ (Add {}) = error "TODO"
 
