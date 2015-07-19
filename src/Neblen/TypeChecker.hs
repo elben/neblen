@@ -66,7 +66,7 @@ isBound = not . isFree
 -- TVec TInt
 --
 bindFreeTo :: Name -> Type -> Type -> Type
-bindFreeTo name t (TVar n) = if name == n then t else (TVar n)
+bindFreeTo name t (TVar n) = if name == n then t else TVar n
 bindFreeTo name t (TFun a b) = TFun (bindFreeTo name t a) (bindFreeTo name t b)
 bindFreeTo name t (TList t') = TList (bindFreeTo name t t')
 bindFreeTo name t (TVec t') = TVec (bindFreeTo name t t')
@@ -89,99 +89,115 @@ lookupEnv env name = M.lookup name env
 insertEnv :: TEnv -> Name -> Type -> TEnv
 insertEnv env name t = M.insert name t env
 
--- | Type check expression.
---
--- -- TODO: Convert to monad transformer so that TEnv is passed along
-checkExp :: TEnv -> Exp -> (TEnv, Type)
-
 -- >>> checkExp emptyTEnv (Literal (IntV 0))
 -- (fromList [],TInt)
 --
-checkExp env (Literal (IntV _)) = (env, TInt)
-
 -- >>> checkExp emptyTEnv (Literal (BoolV 0))
 -- (fromList [],TBool)
 --
-checkExp env (Literal (BoolV _)) = (env, TBool)
-
-
 -- >>> checkExp emptyTEnv (Literal (StringV 0))
 -- (fromList [],TString)
 --
-checkExp env (Literal (StringV _)) = (env, TString)
+checkLiteral :: TEnv -> Exp -> (TEnv, Type)
+checkLiteral env (Literal (IntV _)) = (env, TInt)
+checkLiteral env (Literal (BoolV _)) = (env, TBool)
+checkLiteral env (Literal (StringV _)) = (env, TString)
+checkLiteral _ _ = error "Invalid"
 
+-- | Check variable.
+--
 -- >>> checkExp (M.fromList [("x",TInt)]) (Var "x")
 -- (fromList [("x",TInt)],TInt)
 --
 -- >>> checkExp emptyTEnv (Var "x")
--- TODO should error
+-- *** Exception: unbounded variable
 --
-checkExp env (Var v) =
+checkVar :: TEnv -> Exp -> (TEnv, Type)
+checkVar env (Var v) =
   case lookupEnv env v of
     Just t  -> (env, t)
     Nothing -> error "unbounded variable"
+checkVar _ _ = error "wrong type"
 
--- >>> checkExp emptyTEnv (Let (Var "x") (Literal (IntV 0)) (Var "x"))
+-- | Check let.
+--
+-- >>> checkLet emptyTEnv (Let (Var "x") (Literal (IntV 0)) (Var "x"))
 -- (fromList [],TInt)
 --
--- >>> checkExp emptyTEnv (Let (Var "x") (Literal (IntV 0)) (Literal (BoolV True)))
+-- >>> checkLet emptyTEnv (Let (Var "x") (Literal (IntV 0)) (Literal (BoolV True)))
 -- (fromList [],TBool)
 --
--- >>> checkExp (M.fromList [("b",TBool)]) (Let (Var "x") (Literal (IntV 0)) (Var "b"))
+-- >>> checkLet (M.fromList [("b",TBool)]) (Let (Var "x") (Literal (IntV 0)) (Var "b"))
 -- (fromList [("b",TBool)],TBool)
 --
-checkExp env (Let (Var v) val body) =
+checkLet :: TEnv -> Exp -> (TEnv, Type)
+checkLet env (Let (Var v) val body) =
   let (env', valT) = checkExp env val
       env'' = insertEnv env' v valT
       (_, valB) = checkExp env'' body
   -- Return original env because 'v' is no longer in scope.
   in (env, valB)
+checkLet _ _ = error "wrong type"
 
--- >>> checkExp emptyTEnv (NullaryFun (Var "x"))
--- TODO: should error since "x" is not in the env.
+-- | Check nullary function.
 --
--- >>> checkExp emptyTEnv (NullaryFun (Literal (IntV 0)))
+-- >>> checkNullFun emptyTEnv (NullaryFun (Literal (IntV 0)))
 -- (fromList [],TInt)
 --
-checkExp env (NullaryFun body) = checkExp env body
+-- >>> checkNullFun emptyTEnv (NullaryFun (Var "x"))
+-- *** Exception: unbounded variable
+--
+checkNullFun :: TEnv -> Exp -> (TEnv, Type)
+checkNullFun env (NullaryFun body) = checkExp env body
+checkNullFun _ _ = error "wrong type"
 
--- >>> checkExp emptyTEnv (Function (Var "x") (Var "x"))
+-- | Check function.
+--
+-- >>> checkFun emptyTEnv (Function (Var "x") (Var "x"))
 -- (fromList [],TFun (TVar "x") (TVar "x"))
 --
--- >>> checkExp emptyTEnv (Function (Var "x") (Literal (IntV 0)))
+-- >>> checkFun emptyTEnv (Function (Var "x") (Literal (IntV 0)))
 -- (fromList [],TFun (TVar "x") TInt)
 --
--- >>> checkExp emptyTEnv (Function (Var "x") (Function (Var "y") (Literal (IntV 0))))
+-- >>> checkFun emptyTEnv (Function (Var "x") (Function (Var "y") (Literal (IntV 0))))
 -- (fromList [],TFun (TVar "x") (TFun (TVar "y") TInt))
 --
 -- Verify that argument variable doesn't override outside scope:
 --   Environment: x : Bool
 --   (fn [x] (fn [y] 0))
 --
--- >>> checkExp (M.fromList [("x",TBool)]) (Function (Var "x") (Function (Var "y") (Literal (IntV 0))))
+-- >>> checkFun (M.fromList [("x",TBool)]) (Function (Var "x") (Function (Var "y") (Literal (IntV 0))))
 -- (fromList [("x",TBool)],TFun (TVar "x") (TFun (TVar "y") TInt))
 --
 -- Below is: (fn [x] (fn [y] x))
--- >>> checkExp emptyTEnv (Function (Var "x") (Function (Var "y") (Var "x")))
+-- >>> checkFun emptyTEnv (Function (Var "x") (Function (Var "y") (Var "x")))
 -- (fromList [],TFun (TVar "x") (TFun (TVar "y") (TVar "x")))
 --
-checkExp env (Function (Var v) body) =
-  let env' = insertEnv env v (TVar v)        -- Set argument as free
+checkFun :: TEnv -> Exp -> (TEnv, Type)
+checkFun env (Function (Var v) body) =
+  let env' = insertEnv env v (TVar v) -- Set argument as free
       (_, bodyT) = checkExp env' body -- Check body
   in (env, TFun (TVar v) bodyT)
+checkFun _ _ = error "wrong type"
 
--- >>> checkExp (M.fromList [("x",TBool)]) (NullaryCall (Var "x"))
+-- | Check nullary function call.
+--
+-- >>> checkNullCall (M.fromList [("x",TBool)]) (NullaryCall (Var "x"))
 -- (fromList [("x",TBool)],TBool)
 --
--- >>> checkExp emptyTEnv (NullaryCall (NullaryFun (Literal (BoolV True))))
+-- >>> checkNullCall emptyTEnv (NullaryCall (NullaryFun (Literal (BoolV True))))
 -- (fromList [],TBool)
 --
--- >>> checkExp emptyTEnv (NullaryCall (Var "x"))
--- error!
+-- >>> checkNullCall emptyTEnv (NullaryCall (Var "x"))
+-- *** Exception: unbounded variable
 --
-checkExp env (NullaryCall (Var v)) = checkExp env (Var v)
-checkExp env (NullaryCall (NullaryFun body)) = checkExp env (NullaryFun body)
+checkNullCall :: TEnv -> Exp -> (TEnv, Type)
+checkNullCall env (NullaryCall (Var v)) = checkExp env (Var v)
+checkNullCall env (NullaryCall (NullaryFun body)) = checkExp env (NullaryFun body)
+checkNullCall _ _ = error "wrong type"
 
+-- | Check unary function call.
+--
 -- >>> checkExp (M.fromList [("x",TFun TInt TBool)]) (UnaryCall (Var "x") (Literal (IntV 0)))
 -- (fromList [("x",TFun TInt TBool)],TBool)
 --
@@ -213,8 +229,20 @@ checkExp env (NullaryCall (NullaryFun body)) = checkExp env (NullaryFun body)
 -- >>> checkExp emptyTEnv (Let (Var "x") (Function (Var "y") (Var "y")) (UnaryCall (Var "x") (Var "x")))
 -- (fromList [],TFun (TVar "y") (TVar "y"))
 --
+-- Below is: ((fn [x] x) 0)
+-- >>> checkExp emptyTEnv (UnaryCall (Function (Var "x") (Var "x")) (Literal (IntV 0)))
+-- (fromList [],TInt)
+--
+-- Below is: ((fn [x] (fn [y] x)) 0)
+-- >>> checkExp emptyTEnv (UnaryCall (Function (Var "x") (Function (Var "y") (Var "x"))) (Literal (IntV 0)))
+-- (fromList [],TFun (TVar "y") TInt)
+--
+-- Below is: ((fn [x] (fn [y] x)) 0 True)
+-- >>> checkExp emptyTEnv (UnaryCall (UnaryCall (Function (Var "x") (Function (Var "y") (Var "x"))) (Literal (IntV 0))) (Literal (BoolV True)))
+-- (fromList [],TInt)
+--
 -- >>> checkExp emptyTEnv (UnaryCall (Var "x") (Literal (IntV 0)))
--- *** Exception: Unbounded variable
+-- *** Exception: unbounded variable
 --
 -- >>> checkExp (M.fromList [("x",TInt)]) (UnaryCall (Var "x") (Literal (IntV 0)))
 -- *** Exception: calling a non-function
@@ -226,7 +254,8 @@ checkExp env (NullaryCall (NullaryFun body)) = checkExp env (NullaryFun body)
 -- >>> checkExp (M.fromList [("x",TFun TBool TInt)]) (UnaryCall (Var "x") (Literal (IntV 0)))
 -- *** Exception: type mismatch: expecting TBool but got TInt
 --
-checkExp env (UnaryCall fn arg) =
+checkUnaryCall :: TEnv -> Exp -> (TEnv, Type)
+checkUnaryCall env (UnaryCall fn arg) =
   let (_, fnT) = checkExp env fn
   in case fnT of
        (TFun a b) ->
@@ -253,34 +282,57 @@ checkExp env (UnaryCall fn arg) =
             --
             else (env, b)
        _ -> error "calling a non-function"
+checkUnaryCall _ _ = error "wrong type"
 
--- Below is: ((fn [x] x) 0)
--- >>> checkExp emptyTEnv (UnaryCall (Function (Var "x") (Var "x")) (Literal (IntV 0)))
--- (fromList [],TInt)
+-- | Check list.
 --
--- ((fn [x] (fn [y] x)) 0)
--- (fn [x] (fn [y] x)) : (-> x (-> y x))
---
---
--- Below is: ((fn [x] (fn [y] x)) 0)
--- >>> checkExp emptyTEnv (UnaryCall (Function (Var "x") (Function (Var "y") (Var "x"))) (Literal (IntV 0)))
--- (fromList [],TFun (TVar "y") TInt)
---
--- Below is: ((fn [x] (fn [y] x)) 0 True)
--- >>> checkExp emptyTEnv (UnaryCall (UnaryCall (Function (Var "x") (Function (Var "y") (Var "x"))) (Literal (IntV 0))) (Literal (BoolV True)))
--- (fromList [],TInt)
-
--- TODO how to deal with a free var where there is no function argument name to
--- use as the variable name.
-checkExp env (List []) = (env, TList TFree)
-checkExp env (List [e]) =
-  let (_, eT) = checkExp env e
+checkList :: TEnv -> Exp -> (TEnv, Type)
+checkList env (List []) = (env, TList TFree)
+checkList env (List [e]) =
+  let (_, eT) = checkList env e
   in (env, TList eT)
-checkExp env (List (e1:e2:es)) =
-  let (_, e1T) = checkExp env e1
-      (_, e2T) = checkExp env e2
+checkList env (List (e1:e2:es)) =
+  let (_, e1T) = checkList env e1
+      (_, e2T) = checkList env e2
   in if e1T == e2T
-       then checkExp env (List (e2:es))
+       then checkList env (List (e2:es))
        else error $ "list type mismatch error: expecting " ++ show e1T ++ " but got " ++ show e1T
+checkList _ _ = error "wrong type"
+
+-- | Check vector.
+--
+-- TODO use vectors but still share code with checkList.
+checkVector :: TEnv -> Exp -> (TEnv, Type)
+checkVector = checkList
+
+-- | Type check expression.
+--
+-- -- TODO: Convert to monad transformer so that TEnv is passed along
+--
+-- >>> checkExp emptyTEnv (Literal (IntV 0))
+-- (fromList [],TInt)
+--
+-- >>> checkExp emptyTEnv (Let (Var "x") (Literal (IntV 0)) (Var "x"))
+-- (fromList [],TInt)
+--
+-- >>> checkExp emptyTEnv (NullaryFun (Literal (IntV 0)))
+-- (fromList [],TInt)
+--
+-- >>> checkExp emptyTEnv (Function (Var "x") (Var "x"))
+-- (fromList [],TFun (TVar "x") (TVar "x"))
+--
+checkExp :: TEnv -> Exp -> (TEnv, Type)
+checkExp env (Literal lit) = checkLiteral env (Literal lit)
+checkExp env (Var v) = checkVar env (Var v)
+checkExp env e@(Let {}) = checkLet env e
+checkExp env e@(NullaryFun {}) = checkNullFun env e
+checkExp env e@(Function {}) = checkFun env e
+checkExp env e@(NullaryCall {}) = checkNullCall env e
+checkExp env e@(UnaryCall {}) = checkUnaryCall env e
+checkExp env e@(List {}) = checkList env e
+checkExp env e@(Vector {}) = checkVector env e
+checkExp _ (Def {}) = error "TODO"
+checkExp _ (Add {}) = error "TODO"
+
 
 
