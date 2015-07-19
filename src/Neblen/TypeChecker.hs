@@ -4,6 +4,7 @@ module Neblen.TypeChecker where
 
 import Neblen.Data
 import qualified Data.Map.Strict as M
+import Data.Maybe (fromMaybe)
 
 type TEnv = M.Map Name Type
 
@@ -173,11 +174,23 @@ checkNullFun _ _ = error "wrong type"
 -- >>> checkFun emptyTEnv (Function (Var "x") (Function (Var "y") (Var "x")))
 -- (fromList [],TFun (TVar "x") (TFun (TVar "y") (TVar "x")))
 --
+-- Below is: (fn [x] x x)
+-- >>> checkExp emptyTEnv (Function (Var "x") (UnaryCall (Var "x") (Var "x")))
+-- (fromList [],TFun (TVar "x") (TFun (TVar "x") (TVar "x")))
+--
+-- Below is: (fn [x] x 3)
+-- >>> checkExp emptyTEnv (Function (Var "x") (UnaryCall (Var "x") (Literal (IntV 3))))
+-- (fromList [],TFun (TFun TInt TVar "stillfree") (TVar "stillfree"))
+--
 checkFun :: TEnv -> Exp -> (TEnv, Type)
 checkFun env (Function (Var v) body) =
-  let env' = insertEnv env v (TVar v) -- Set argument as free
-      (_, bodyT) = checkExp env' body -- Check body
-  in (env, TFun (TVar v) bodyT)
+  let env' = insertEnv env v (TVar v)
+  -- ^ Set argument as free
+      (env'', bodyT) = checkExp env' body
+  -- ^ Check body
+      argT           = fromMaybe (TVar v) (lookupEnv env'' v)
+  -- ^ May have out argument's type when body was checked.
+  in (env, TFun argT bodyT)
 checkFun _ _ = error "wrong type"
 
 -- | Check nullary function call.
@@ -241,6 +254,17 @@ checkNullCall _ _ = error "wrong type"
 -- >>> checkExp emptyTEnv (UnaryCall (UnaryCall (Function (Var "x") (Function (Var "y") (Var "x"))) (Literal (IntV 0))) (Literal (BoolV True)))
 -- (fromList [],TInt)
 --
+-- Below is: ((fn [x] x 3) (fn [x] x))
+-- checkExp emptyTEnv (UnaryCall (Function (Var "x") (UnaryCall (Var "x") (Literal (IntV 3)))) (Function (Var "x") (Var "x")))
+-- TODO
+--
+-- Below is self application (see Pierce pg 345):
+--   Environment: f : (-> a a)
+--   ((fn [x] x x) f) : (-> (-> a a) (-> a a))
+--
+-- >>> checkExp (M.fromList [("f",TFun (TVar "a") (TVar "a"))]) (UnaryCall (Function (Var "x") (UnaryCall (Var "x") (Var "x"))) (Var "f"))
+-- (fromList [("f",TFun (TVar "a") (TVar "a"))],TFun (TFun (TVar "a") (TVar "a")) (TFun (TVar "a") (TVar "a")))
+--
 -- >>> checkExp emptyTEnv (UnaryCall (Var "x") (Literal (IntV 0)))
 -- *** Exception: unbounded variable
 --
@@ -253,6 +277,25 @@ checkNullCall _ _ = error "wrong type"
 --
 -- >>> checkExp (M.fromList [("x",TFun TBool TInt)]) (UnaryCall (Var "x") (Literal (IntV 0)))
 -- *** Exception: type mismatch: expecting TBool but got TInt
+
+-- Below is:
+--   Environment:
+--     x : (-> a a)
+--  ((fn [y] y 3) x)
+--
+-- TODO: This needs a unifier to realize that a = stillfree = TInt.
+--
+-- >>> checkExp (M.fromList [("x", TFun (TVar "a") (TVar "a"))]) (UnaryCall (Function (Var "y") (UnaryCall (Var "y") (Literal (IntV 3)))) (Var "x"))
+-- *** Exception: type mismatch: expecting TFun TInt (TVar "stillfree") but got TFun (TVar "a") (TVar "a")
+
+-- Below is: ((fn [x] x 3) (fn [x] x))
+--                         (-> a a)
+--            (fn [x : (-> a a)] x 3)
+--
+-- TODO: This needs a unifier>
+--
+-- >>> checkExp emptyTEnv (UnaryCall (Function (Var "x") (UnaryCall (Var "x") (Literal (IntV 3)))) (Function (Var "x") (Var "x")))
+-- *** Exception: type mismatch: expecting TFun TInt (TVar "stillfree") but got TFun (TVar "x") (TVar "x")
 --
 checkUnaryCall :: TEnv -> Exp -> (TEnv, Type)
 checkUnaryCall env (UnaryCall fn arg) =
@@ -281,22 +324,61 @@ checkUnaryCall env (UnaryCall fn arg) =
             -- ((-> a Bool) Int) => ((-> Int Bool) Int) => Bool
             --
             else (env, b)
+
+       -- The function type is still free. We can bound the function argument to
+       -- the argument type, but we don't know what the resulting type is. What
+       -- we need is a type hint from the user.
+       --
+       -- Possibilities (given x and y are free):
+       --
+       --   (x 0) - x : (-> Int ?)
+       --   (x e) - x : (-> (typeOf e) ?)
+       --
+       --   (x x) - x : (-> x ?)
+       --   (x y) - x : (-> y ?)
+       --
+       -- We can't do this in Haskell either:
+       --
+       --   foo bar = bar bar
+       --
+       (TVar vT) ->
+         let (_, argT) = checkExp env arg
+         in if isBound argT
+            then let retT = TVar "stillfree"
+                     -- We partially know the type of the function. Add that to
+                     -- the env so that parent can use it in their type check.
+                     env' = insertEnv env vT (TFun argT retT)
+                 in (env', retT)
+            else (env, TFun (TVar "free") (TVar "free"))
        _ -> error "calling a non-function"
 checkUnaryCall _ _ = error "wrong type"
 
 -- | Check list.
 --
+-- >>> checkList emptyTEnv (List [Literal (IntV 0)])
+-- (fromList [],TList TInt)
+--
+-- Below is: (list 0 ((fn [x] x) 0))
+-- >>> checkList emptyTEnv (List [Literal (IntV 0),UnaryCall (Function (Var "x") (Var "x")) (Literal (IntV 0))])
+-- (fromList [],TList TInt)
+--
+-- >>> checkList emptyTEnv (List [Literal (IntV 0),Literal (BoolV True)])
+-- *** Exception: list type mismatch: TInt and TBool found
+--
+-- >>> checkList emptyTEnv (List [])
+-- TODO: need to use a TVar with non-clashing variable name.
+--
 checkList :: TEnv -> Exp -> (TEnv, Type)
 checkList env (List []) = (env, TList TFree)
 checkList env (List [e]) =
-  let (_, eT) = checkList env e
+  let (_, eT) = checkExp env e
   in (env, TList eT)
 checkList env (List (e1:e2:es)) =
-  let (_, e1T) = checkList env e1
-      (_, e2T) = checkList env e2
+  let (_, e1T) = checkExp env e1
+      (_, e2T) = checkExp env e2
   in if e1T == e2T
        then checkList env (List (e2:es))
-       else error $ "list type mismatch error: expecting " ++ show e1T ++ " but got " ++ show e1T
+       else error $ "list type mismatch: " ++ show e1T ++ " and " ++ show e2T ++ " found"
 checkList _ _ = error "wrong type"
 
 -- | Check vector.
