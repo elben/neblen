@@ -5,11 +5,18 @@ module Neblen.TypeChecker where
 import Neblen.Data
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe)
+import Control.Monad
 
+-- Mapping of variables to its type.
 type TEnv = M.Map Name Type
 
+-- Type variable.
 type TName = String
 
+-- Unification environment. Mapping of type variables to its type.
+type UEnv = M.Map TName Type
+
+-- TODO extract literal types to TLit, similar to "Literal" for expressions?
 data Type = TInt
           | TBool
           | TString
@@ -22,6 +29,31 @@ data Type = TInt
 
 data TypeError = Mismatch Type Type
   deriving (Show)
+
+--
+-- TODO: This needs a unifier to realize that a = stillfree = TInt.
+--
+-- >>> checkExp (M.fromList [("x", TFun (TVar "a") (TVar "a"))]) (UnaryCall (Function (Var "y") (UnaryCall (Var "y") (Literal (IntV 3)))) (Var "x"))
+-- *** Exception: type mismatch: expecting TFun TInt (TVar "stillfree") but got TFun (TVar "a") (TVar "a")
+-- ^ This should unify to: TFun TInt TInt
+
+-- Below is: ((fn [x] x 3) (fn [x] x))
+--                         (-> a a)
+--            (fn [x : (-> a a)] x 3)
+--
+-- TODO: This needs a unifier:
+--
+-- >>> checkExp emptyTEnv (UnaryCall (Function (Var "x") (UnaryCall (Var "x") (Literal (IntV 3)))) (Function (Var "x") (Var "x")))
+-- *** Exception: type mismatch: expecting TFun TInt (TVar "stillfree") but got TFun (TVar "x") (TVar "x")
+--
+-- unify :: TEnv -> UEnv -> Type -> Type -> (UEnv, Type)
+-- unify tenv uenv (TFun a b) (TFun x y) =
+-- unify tenv uenv (TFun a b) (TFun x y) =
+  -- harvest all the free variables.
+  -- permute through all possible configurations.
+
+letters :: [String]
+letters = [1..] >>= flip replicateM ['a'..'z']
 
 -- | Checks if type is free.
 --
@@ -180,7 +212,7 @@ checkNullFun _ _ = error "wrong type"
 --
 -- Below is: (fn [x] x 3)
 -- >>> checkExp emptyTEnv (Function (Var "x") (UnaryCall (Var "x") (Literal (IntV 3))))
--- (fromList [],TFun (TFun TInt TVar "stillfree") (TVar "stillfree"))
+-- (fromList [],TFun (TFun TInt (TVar "stillfree")) (TVar "stillfree"))
 --
 checkFun :: TEnv -> Exp -> (TEnv, Type)
 checkFun env (Function (Var v) body) =
@@ -292,7 +324,7 @@ checkNullCall _ _ = error "wrong type"
 --                         (-> a a)
 --            (fn [x : (-> a a)] x 3)
 --
--- TODO: This needs a unifier>
+-- TODO: This needs a unifier:
 --
 -- >>> checkExp emptyTEnv (UnaryCall (Function (Var "x") (UnaryCall (Var "x") (Literal (IntV 3)))) (Function (Var "x") (Var "x")))
 -- *** Exception: type mismatch: expecting TFun TInt (TVar "stillfree") but got TFun (TVar "x") (TVar "x")
@@ -337,7 +369,7 @@ checkUnaryCall env (UnaryCall fn arg) =
        --   (x x) - x : (-> x ?)
        --   (x y) - x : (-> y ?)
        --
-       -- We can't do this in Haskell either:
+       -- We can't do this in Haskell either (occur typing):
        --
        --   foo bar = bar bar
        --
@@ -404,7 +436,7 @@ checkIf env (If p t e) =
        TBool ->
          let (_, tT) = checkExp env t
              (_, eT) = checkExp env e
-         in if (tT == eT)
+         in if tT == eT
             then (env, eT)
             else error $ "then and else clause type mismatch: " ++ show tT ++ " and " ++ show eT ++ " found"
        _     ->
@@ -414,6 +446,8 @@ checkIf _ _ = error "wrong type"
 -- | Type check expression.
 --
 -- -- TODO: Convert to monad transformer so that TEnv is passed along
+-- TODO: Convert to monad so we can pass a State along that contains the free
+-- variable generator counter.
 --
 -- >>> checkExp emptyTEnv (Literal (IntV 0))
 -- (fromList [],TInt)
