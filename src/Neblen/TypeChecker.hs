@@ -77,24 +77,33 @@ getFresh = do
 -- >>> unify emptyUEnv (TFun TInt TInt) (TFun (TVar "a") (TVar "b"))
 -- (fromList [("a",TInt),("b",TInt)],TFun TInt TInt)
 --
--- Here is a complex one:
+-- Some complex ones:
+--
 -- >>> unify emptyUEnv (TFun TInt (TVar "a")) (TFun (TVar "a") (TVar "b"))
 -- (fromList [("a",TInt),("b",TInt)],TFun TInt TInt)
 --
 -- >>> unify emptyUEnv (TFun TInt (TVar "a")) (TFun (TVar "b") (TVar "b"))
 -- (fromList [("a",TInt),("b",TInt)],TFun TInt TInt)
 --
--- >>> unify (M.fromList [("a",TBool)]) (TVar "a") TInt
--- *** Exception: type mismatch: expecting TBool but got TInt
+-- >>> unify (M.fromList [("b",TBool)]) (TFun (TVar "a") (TVar "a")) (TFun (TVar "a") (TVar "b"))
+-- (fromList [("a",TBool),("b",TBool)],TFun TBool TBool)
 --
 -- >>> unify (M.fromList [("a",TBool)]) TInt (TVar "a")
 -- *** Exception: type mismatch: expecting TBool but got TInt
 --
 -- >>> unify emptyUEnv (TFun (TVar "a") (TVar "a")) (TFun (TVar "a") (TVar "a"))
--- (fromList *** Exception: infinite type!
+-- (fromList [],TFun (TVar "a") (TVar "a"))
 --
 -- >>> unify (M.fromList [("a",TInt)]) (TFun (TVar "a") (TVar "b")) (TFun (TVar "a") (TVar "b"))
--- (fromList *** Exception: infinite type!
+-- (fromList [("a",TInt)],TFun TInt (TVar "b"))
+--
+-- Failure cases:
+--
+-- >>> unify (M.fromList [("a",TBool)]) (TVar "a") TInt
+-- *** Exception: type mismatch: expecting TBool but got TInt
+--
+-- >>> unify (M.fromList [("a",TBool)]) TInt (TVar "a")
+-- *** Exception: type mismatch: expecting TBool but got TInt
 --
 unify :: UEnv -> Type -> Type -> (UEnv, Type)
 unify uenv TInt TInt = (uenv, TInt)
@@ -104,23 +113,33 @@ unify uenv (TVar tv) t2 = unifyTVar uenv (TVar tv) t2
 unify uenv t1 (TVar tv) = unifyTVar uenv (TVar tv) t1
 unify uenv (TFun a1 r1) (TFun a2 r2) =
   let (uenv', ta) = unify uenv a1 a2
-      (tenv'', tr) = unify uenv' r1 r2
-  in (tenv'', TFun ta tr)
+      (uenv'', tr) = unify uenv' r1 r2
+  -- We now have a u-env built from both argument and return types. Substitue
+  -- any remaining type variables.
+  in (uenv'', TFun (replaceTVarInEnv uenv'' ta) (replaceTVarInEnv uenv'' tr))
 unify _ t1 t2 = error $ "type mismatch: expecting " ++ show t1 ++ " but got " ++ show t2
 
 unifyTVar :: UEnv -> Type -> Type -> (UEnv, Type)
 unifyTVar uenv (TVar tv) t2 =
-  let mtv = lookupEnv uenv tv
-  in case mtv of
-       Nothing ->
-         case t2 of
-           TVar tv' -> case lookupEnv uenv tv' of
-                         Nothing -> error $ "infinite type: " ++ show tv ++ " and " ++ show tv'
-                         Just t' -> unify (insertEnv uenv tv' t') (TVar tv') t'
-           _      -> let uenv' = insertEnv uenv tv t2
-                     in unify uenv' (TVar tv) t2
-       Just t ->
-         unify uenv t t2
+  case lookupEnv uenv tv of
+    Nothing ->
+      case t2 of
+        -- If both sides are free, then see if we can resolve the RHS with the
+        -- u-env. For example, in (-> a a) (-> a b) with uenv {b -> Int}, the
+        -- LHS failed to resolve, so we try the RHS.
+        TVar tv' -> case lookupEnv uenv tv' of
+                      -- Can't resolve RHS, so just return free.
+                      Nothing -> (uenv, TVar tv')
+
+                      -- Resolved RHS. In the example above, b (RHS) is resolved to
+                      -- Int. So we need to update uenv to {b -> Int, a -> Int}
+                      Just t' -> let uenv' = (insertEnv uenv tv' t')
+                                     uenv'' = (insertEnv uenv' tv t')
+                                 in unify (insertEnv uenv'' tv' t') (TVar tv') t'
+        _      -> let uenv' = insertEnv uenv tv t2
+                  in unify uenv' (TVar tv) t2
+    Just t ->
+      unify uenv t t2
 unifyTVar _ _ _ = error "bad call to unifyTVar"
 
   -- harvest all the free variables.
@@ -209,6 +228,10 @@ emptyUEnv = M.empty
 
 lookupEnv :: TEnv -> Name -> Maybe Type
 lookupEnv tenv name = M.lookup name tenv
+
+replaceTVarInEnv :: UEnv -> Type -> Type
+replaceTVarInEnv uenv (TVar name) = fromMaybe (TVar name) (lookupEnv uenv name)
+replaceTVarInEnv _ t = t
 
 insertEnv :: TEnv -> Name -> Type -> TEnv
 insertEnv tenv name t = M.insert name t tenv
