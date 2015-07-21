@@ -81,6 +81,9 @@ getFresh = do
 -- >>> unify emptyUEnv (TFun TInt (TVar "a")) (TFun (TVar "a") (TVar "b"))
 -- (fromList [("a",TInt),("b",TInt)],TFun TInt TInt)
 --
+-- >>> unify emptyUEnv (TFun TInt (TVar "a")) (TFun (TVar "b") (TVar "b"))
+-- (fromList [("a",TInt),("b",TInt)],TFun TInt TInt)
+--
 -- >>> unify (M.fromList [("a",TBool)]) (TVar "a") TInt
 -- *** Exception: type mismatch: expecting TBool but got TInt
 --
@@ -94,28 +97,30 @@ getFresh = do
 -- (fromList *** Exception: infinite type!
 --
 unify :: UEnv -> Type -> Type -> (UEnv, Type)
-unify utenv TInt TInt = (utenv, TInt)
-unify utenv TBool TBool = (utenv, TBool)
-unify utenv TString TString = (utenv, TString)
-unify utenv (TVar tv) t2 = unifyTVar utenv (TVar tv) t2
-unify utenv t1 (TVar tv) = unifyTVar utenv (TVar tv) t1
-unify utenv (TFun a1 r1) (TFun a2 r2) =
-  let (utenv', ta) = unify utenv a1 a2
-      (tenv'', tr) = unify utenv' r1 r2
+unify uenv TInt TInt = (uenv, TInt)
+unify uenv TBool TBool = (uenv, TBool)
+unify uenv TString TString = (uenv, TString)
+unify uenv (TVar tv) t2 = unifyTVar uenv (TVar tv) t2
+unify uenv t1 (TVar tv) = unifyTVar uenv (TVar tv) t1
+unify uenv (TFun a1 r1) (TFun a2 r2) =
+  let (uenv', ta) = unify uenv a1 a2
+      (tenv'', tr) = unify uenv' r1 r2
   in (tenv'', TFun ta tr)
 unify _ t1 t2 = error $ "type mismatch: expecting " ++ show t1 ++ " but got " ++ show t2
 
 unifyTVar :: UEnv -> Type -> Type -> (UEnv, Type)
-unifyTVar utenv (TVar tv) t2 =
-  let mtv = lookupEnv utenv tv
+unifyTVar uenv (TVar tv) t2 =
+  let mtv = lookupEnv uenv tv
   in case mtv of
        Nothing ->
          case t2 of
-           TVar _ -> error "infinite type!"
-           _      -> let utenv' = insertEnv utenv tv t2
-                     in unify utenv' (TVar tv) t2
+           TVar tv' -> case lookupEnv uenv tv' of
+                         Nothing -> error $ "infinite type: " ++ show tv ++ " and " ++ show tv'
+                         Just t' -> unify (insertEnv uenv tv' t') (TVar tv') t'
+           _      -> let uenv' = insertEnv uenv tv t2
+                     in unify uenv' (TVar tv) t2
        Just t ->
-         unify utenv t t2
+         unify uenv t t2
 unifyTVar _ _ _ = error "bad call to unifyTVar"
 
   -- harvest all the free variables.
@@ -399,16 +404,17 @@ checkNullCall _ _ _ = error "wrong type"
 -- Below is:
 --   Environment:
 --     x : (-> a a)
---  ((fn [y] y 3) x)
+--  ((fn [y] y 3) x) : Int
 --
--- TODO: This needs a unifier to realize that a = stillfree = TInt.
+-- TODO:
+--   This needs a unifier to realize that a = stillfree = TInt.
 --
--- >>> checkExp (M.fromList [("x", TFun (TVar "a") (TVar "a"))]) (UnaryCall (Function (Var "y") (UnaryCall (Var "y") (Literal (IntV 3)))) (Var "x"))
+-- >>> checkExp (M.fromList [("x", TFun (TVar "a") (TVar "a"))]) emptyTEnv (UnaryCall (Function (Var "y") (UnaryCall (Var "y") (Literal (IntV 3)))) (Var "x"))
 -- *** Exception: type mismatch: expecting TFun TInt (TVar "stillfree") but got TFun (TVar "a") (TVar "a")
 
 -- Below is: ((fn [x] x 3) (fn [x] x))
 --                         (-> a a)
---            (fn [x : (-> a a)] x 3)
+--            (fn [x : (-> a a)] x 3) : Int
 --
 -- TODO: This needs a unifier:
 --
