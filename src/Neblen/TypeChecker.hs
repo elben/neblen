@@ -6,6 +6,7 @@ import Neblen.Data
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe)
 import Control.Monad
+import Control.Monad.State
 
 -- Mapping of variables to its type.
 type TEnv = M.Map Name Type
@@ -36,6 +37,25 @@ data TypeError = Mismatch Type Type
 
 newtype FreshCounter = FreshCounter { getFreshCounter :: Int }
 
+initFreshCounter :: FreshCounter
+initFreshCounter = FreshCounter { getFreshCounter = 0 }
+
+letters :: [String]
+letters = [1..] >>= flip replicateM ['a'..'z']
+
+-- | Get fresh variable.
+--
+-- >>> evalState getFresh initFreshCounter
+-- a
+--
+-- >>> evalState getFresh (FreshCounter { getFreshCounter = 25 })
+-- z
+--
+getFresh :: State FreshCounter TName
+getFresh = do
+  s <- get
+  let c = getFreshCounter s
+  return $ letters !! c
 
 -- | Unify types.
 --
@@ -117,9 +137,6 @@ unifyTVar _ _ _ = error "bad call to unifyTVar"
 -- >>> checkExp emptyTEnv (UnaryCall (Function (Var "x") (UnaryCall (Var "x") (Literal (IntV 3)))) (Function (Var "x") (Var "x")))
 -- *** Exception: type mismatch: expecting TFun TInt (TVar "stillfree") but got TFun (TVar "x") (TVar "x")
 --
-
-letters :: [String]
-letters = [1..] >>= flip replicateM ['a'..'z']
 
 -- | Checks if type is free.
 --
@@ -546,6 +563,4 @@ checkExp env e@(Vector {}) = checkVector env e
 checkExp env e@(If {}) = checkIf env e
 checkExp _ (Def {}) = error "TODO"
 checkExp _ (Add {}) = error "TODO"
-
-
 
