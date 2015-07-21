@@ -28,8 +28,79 @@ data Type = TInt
   deriving (Show, Eq)
 
 data TypeError = Mismatch Type Type
+               | UnboundVariable Name
+               | InfiniteType Type Type -- InfiteType TVar Type
+               | GenericTypeError
+
   deriving (Show)
 
+newtype FreshCounter = FreshCounter { getFreshCounter :: Int }
+
+
+-- | Unify types.
+--
+-- >>> unify emptyUEnv TInt TInt
+-- (fromList [],TInt)
+--
+-- >>> unify emptyUEnv (TVar "a") TInt
+-- (fromList [("a",TInt)],TInt)
+--
+-- >>> unify emptyUEnv TInt (TVar "a")
+-- (fromList [("a",TInt)],TInt)
+--
+-- >>> unify (M.fromList [("a",TInt)]) (TVar "a") (TVar "a")
+-- (fromList [("a",TInt)],TInt)
+--
+-- >>> unify (M.fromList [("a",TInt)]) (TVar "a") (TVar "b")
+-- (fromList [("a",TInt),("b",TInt)],TInt)
+--
+-- >>> unify emptyUEnv (TFun TInt TInt) (TFun (TVar "a") (TVar "b"))
+-- (fromList [("a",TInt),("b",TInt)],TFun TInt TInt)
+--
+-- Here is a complex one:
+-- >>> unify emptyUEnv (TFun TInt (TVar "a")) (TFun (TVar "a") (TVar "b"))
+-- (fromList [("a",TInt),("b",TInt)],TFun TInt TInt)
+--
+-- >>> unify (M.fromList [("a",TBool)]) (TVar "a") TInt
+-- *** Exception: type mismatch: expecting TBool but got TInt
+--
+-- >>> unify (M.fromList [("a",TBool)]) TInt (TVar "a")
+-- *** Exception: type mismatch: expecting TBool but got TInt
+--
+-- >>> unify emptyUEnv (TFun (TVar "a") (TVar "a")) (TFun (TVar "a") (TVar "a"))
+-- (fromList *** Exception: infinite type!
+--
+-- >>> unify (M.fromList [("a",TInt)]) (TFun (TVar "a") (TVar "b")) (TFun (TVar "a") (TVar "b"))
+-- (fromList *** Exception: infinite type!
+--
+unify :: UEnv -> Type -> Type -> (UEnv, Type)
+unify uenv TInt TInt = (uenv, TInt)
+unify uenv TBool TBool = (uenv, TBool)
+unify uenv TString TString = (uenv, TString)
+unify uenv (TVar tv) t2 = unifyTVar uenv (TVar tv) t2
+unify uenv t1 (TVar tv) = unifyTVar uenv (TVar tv) t1
+unify uenv (TFun a1 r1) (TFun a2 r2) =
+  let (uenv', ta) = unify uenv a1 a2
+      (env'', tr) = unify uenv' r1 r2
+  in (env'', TFun ta tr)
+unify _ t1 t2 = error $ "type mismatch: expecting " ++ show t1 ++ " but got " ++ show t2
+
+unifyTVar :: UEnv -> Type -> Type -> (UEnv, Type)
+unifyTVar uenv (TVar tv) t2 =
+  let mtv = lookupEnv uenv tv
+  in case mtv of
+       Nothing ->
+         case t2 of
+           TVar _ -> error "infinite type!"
+           _      -> let uenv' = insertEnv uenv tv t2
+                     in unify uenv' (TVar tv) t2
+       Just t ->
+         unify uenv t t2
+unifyTVar _ _ _ = error "bad call to unifyTVar"
+
+  -- harvest all the free variables.
+  -- permute through all possible configurations.
+  --
 --
 -- TODO: This needs a unifier to realize that a = stillfree = TInt.
 --
@@ -46,11 +117,6 @@ data TypeError = Mismatch Type Type
 -- >>> checkExp emptyTEnv (UnaryCall (Function (Var "x") (UnaryCall (Var "x") (Literal (IntV 3)))) (Function (Var "x") (Var "x")))
 -- *** Exception: type mismatch: expecting TFun TInt (TVar "stillfree") but got TFun (TVar "x") (TVar "x")
 --
--- unify :: TEnv -> UEnv -> Type -> Type -> (UEnv, Type)
--- unify tenv uenv (TFun a b) (TFun x y) =
--- unify tenv uenv (TFun a b) (TFun x y) =
-  -- harvest all the free variables.
-  -- permute through all possible configurations.
 
 letters :: [String]
 letters = [1..] >>= flip replicateM ['a'..'z']
@@ -115,6 +181,9 @@ typeVarName _ = error "Invalid call."
 
 emptyTEnv :: TEnv
 emptyTEnv = M.empty
+
+emptyUEnv :: UEnv
+emptyUEnv = M.empty
 
 lookupEnv :: TEnv -> Name -> Maybe Type
 lookupEnv env name = M.lookup name env
