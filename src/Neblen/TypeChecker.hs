@@ -5,6 +5,7 @@ module Neblen.TypeChecker where
 import Neblen.Data
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe)
+import qualified Data.Set as S
 import Control.Monad
 import Control.Monad.State
 
@@ -46,10 +47,10 @@ letters = [1..] >>= flip replicateM ['a'..'z']
 -- | Get fresh variable.
 --
 -- >>> evalState getFresh initFreshCounter
--- a
+-- "a"
 --
 -- >>> evalState getFresh (FreshCounter { getFreshCounter = 25 })
--- z
+-- "z"
 --
 getFresh :: State FreshCounter TName
 getFresh = do
@@ -62,13 +63,7 @@ getFresh = do
 -- >>> unify emptyUEnv TInt TInt
 -- (fromList [],TInt)
 --
--- >>> unify emptyUEnv (TVar "a") TInt
--- (fromList [("a",TInt)],TInt)
---
 -- >>> unify emptyUEnv TInt (TVar "a")
--- (fromList [("a",TInt)],TInt)
---
--- >>> unify (M.fromList [("a",TInt)]) (TVar "a") (TVar "a")
 -- (fromList [("a",TInt)],TInt)
 --
 -- >>> unify (M.fromList [("a",TInt)]) (TVar "a") (TVar "b")
@@ -76,8 +71,6 @@ getFresh = do
 --
 -- >>> unify emptyUEnv (TFun TInt TInt) (TFun (TVar "a") (TVar "b"))
 -- (fromList [("a",TInt),("b",TInt)],TFun TInt TInt)
---
--- Some complex ones:
 --
 -- >>> unify emptyUEnv (TFun TInt (TVar "a")) (TFun (TVar "a") (TVar "b"))
 -- (fromList [("a",TInt),("b",TInt)],TFun TInt TInt)
@@ -88,22 +81,28 @@ getFresh = do
 -- >>> unify (M.fromList [("b",TBool)]) (TFun (TVar "a") (TVar "a")) (TFun (TVar "a") (TVar "b"))
 -- (fromList [("a",TBool),("b",TBool)],TFun TBool TBool)
 --
--- >>> unify (M.fromList [("a",TBool)]) TInt (TVar "a")
--- *** Exception: type mismatch: expecting TBool but got TInt
+-- >>> unify (M.fromList [("a",TInt)]) (TFun (TVar "a") (TVar "b")) (TFun (TVar "a") (TVar "b"))
+-- (fromList [("a",TInt)],TFun TInt (TVar "b"))
+--
+-- >>> unify (M.fromList [("b",TBool)]) (TFun (TVar "a") (TVar "b")) (TFun (TVar "c") (TVar "d"))
+-- (fromList [("a",TVar "c"),("b",TBool),("c",TVar "a"),("d",TBool)],TFun (TVar "c") TBool)
 --
 -- >>> unify emptyUEnv (TFun (TVar "a") (TVar "a")) (TFun (TVar "a") (TVar "a"))
 -- (fromList [],TFun (TVar "a") (TVar "a"))
---
--- >>> unify (M.fromList [("a",TInt)]) (TFun (TVar "a") (TVar "b")) (TFun (TVar "a") (TVar "b"))
--- (fromList [("a",TInt)],TFun TInt (TVar "b"))
 --
 -- Failure cases:
 --
 -- >>> unify (M.fromList [("a",TBool)]) (TVar "a") TInt
 -- *** Exception: type mismatch: expecting TBool but got TInt
 --
+-- >>> unify emptyUEnv (TVar "a") (TFun (TVar "a") TInt)
+-- *** Exception: infinite type: TVar "a" and TFun (TVar "a") TInt
+--
 -- >>> unify (M.fromList [("a",TBool)]) TInt (TVar "a")
 -- *** Exception: type mismatch: expecting TBool but got TInt
+--
+-- >>> unify emptyUEnv (TVar "a") (TFun (TVar "a") TInt)
+-- *** Exception: infinite type: TVar "a" and TFun (TVar "a") TInt
 --
 unify :: UEnv -> Type -> Type -> (UEnv, Type)
 unify uenv TInt TInt = (uenv, TInt)
@@ -127,20 +126,56 @@ unifyTVar uenv (TVar tv) t2 =
         -- If both sides are free, then see if we can resolve the RHS with the
         -- u-env. For example, in (-> a a) (-> a b) with uenv {b -> Int}, the
         -- LHS failed to resolve, so we try the RHS.
-        TVar tv' -> case lookupEnv uenv tv' of
-                      -- Can't resolve RHS, so just return free.
-                      Nothing -> (uenv, TVar tv')
+        TVar tv2 -> case lookupEnv uenv tv2 of
+                      -- RHS is still free.
+                      Nothing -> if tv == tv2
+                                 -- Same free variable. Return this free
+                                 -- variable.
+                                 then (uenv, TVar tv2)
+
+                                 else if occursCheck tv t2
+                                 then error $ "infinite type: " ++ show (TVar tv) ++ " and " ++ show t2
+
+                                 -- Unify free variables together.
+                                 --
+                                 -- Example: a <==> b.
+                                 -- UEnv: {a -> b, b -> a}
+                                 -- Returned: a
+                                 else (insertEnv (insertEnv uenv tv (TVar tv2)) tv2 (TVar tv), TVar tv)
 
                       -- Resolved RHS. In the example above, b (RHS) is resolved to
                       -- Int. So we need to update uenv to {b -> Int, a -> Int}
-                      Just t' -> let uenv' = (insertEnv uenv tv' t')
-                                     uenv'' = (insertEnv uenv' tv t')
-                                 in unify (insertEnv uenv'' tv' t') (TVar tv') t'
-        _      -> let uenv' = insertEnv uenv tv t2
-                  in unify uenv' (TVar tv) t2
-    Just t ->
-      unify uenv t t2
+                      Just t2' -> let uenv' = (insertEnv uenv tv2 t2')
+                                      uenv'' = (insertEnv uenv' tv t2')
+                                  in unify (insertEnv uenv'' tv2 t2') (TVar tv2) t2'
+        _      -> if occursCheck tv t2
+                  then error $ "infinite type: " ++ show (TVar tv) ++ " and " ++ show t2
+                  else let uenv' = insertEnv uenv tv t2
+                       in unify uenv' (TVar tv) t2
+    Just t1 ->
+      unify uenv t1 t2
 unifyTVar _ _ _ = error "bad call to unifyTVar"
+
+-- This occurs check asserts that if we are applying a substitution of variable
+-- x to an expression e, the variable x cannot be free in e. Otherwise the
+-- rewrite would diverge, constantly rewriting itself.
+--
+-- That is, an infinite type.
+--
+-- For example, this won't unify: a <==> (a -> b).
+--
+-- But note that this should not be used to check: a <==> a.  If the type
+-- variables are the same, it is OK (it is not infinite, we can just replace 'a'
+-- with any type once we resolve its type)
+--
+-- >>> occursCheck "a" (TFun TInt (TVar "a"))
+-- True
+--
+-- >>> occursCheck "a" (TFun TInt (TVar "b"))
+-- False
+--
+occursCheck :: TName -> Type -> Bool
+occursCheck tv t = S.member tv (findAllTVars t)
 
   -- harvest all the free variables.
   -- permute through all possible configurations.
@@ -211,6 +246,13 @@ bindFree name t (TFun a b) = TFun (bindFree name t a) (bindFree name t b)
 bindFree name t (TList t') = TList (bindFree name t t')
 bindFree name t (TVec t') = TVec (bindFree name t t')
 bindFree _ _ t = t
+
+findAllTVars :: Type -> S.Set TName
+findAllTVars (TVar t) = S.singleton t
+findAllTVars (TFun a r) = S.union (findAllTVars a) (findAllTVars r)
+findAllTVars (TList t) = findAllTVars t
+findAllTVars (TVec t) = findAllTVars t
+findAllTVars _ = S.empty
 
 typeVarName :: Type -> Name
 typeVarName (TVar n) = n
@@ -330,12 +372,10 @@ checkNullFun _ _ _ = error "wrong type"
 --
 checkFun :: TEnv -> UEnv -> Exp -> (TEnv, UEnv, Type)
 checkFun tenv uenv (Function (Var v) body) =
-  let tenv' = insertEnv tenv v (TVar v)
-  -- ^ Set argument as free
-      (tenv'', uenv', bodyT) = checkExp tenv' uenv body
-  -- ^ Check body
+  let tenv' = insertEnv tenv v (TVar v) -- Set argument as free
+      (tenv'', uenv', bodyT) = checkExp tenv' uenv body -- Check body
+      -- May have out argument's type when body was checked.
       argT           = fromMaybe (TVar v) (lookupEnv tenv'' v)
-  -- ^ May have out argument's type when body was checked.
   in (tenv, uenv, TFun argT bodyT)
 checkFun _ _ _ = error "wrong type"
 
@@ -489,6 +529,9 @@ checkUnaryCall tenv uenv (UnaryCall fn arg) =
        -- We can't do this in Haskell either (occur typing):
        --
        --   foo bar = bar bar
+       --
+       --     bar : a -> b
+       --     foo: (a -> b) -> ???
        --
        (TVar vT) ->
          let (_, uenv'', argT) = checkExp tenv uenv' arg
