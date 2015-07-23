@@ -7,8 +7,8 @@ import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as S
 import Control.Monad
-import Control.Monad.State
-import Control.Monad.Except
+import Control.Monad.Trans.State
+import Control.Monad.Trans.Except
 
 
 -- Mapping of variables to its type.

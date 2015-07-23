@@ -16,7 +16,7 @@ library
                   , parsec >= 3.1.9
                   , haskeline >= 0.7.1.2
                   , process >= 1.2.0.0
-                  , mtl >= 2.2.0.0
+                  , transformers >= 0.4.3.0
 
   ghc-options:      -threaded
                     -Wall
