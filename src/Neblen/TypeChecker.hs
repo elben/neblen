@@ -8,6 +8,8 @@ import Data.Maybe (fromMaybe)
 import qualified Data.Set as S
 import Control.Monad
 import Control.Monad.State
+import Control.Monad.Except
+
 
 -- Mapping of variables to its type.
 type TEnv = M.Map Name Type
@@ -18,7 +20,13 @@ type TName = String
 -- Unification tenvironment. Mapping of type variables to its type.
 type UEnv = M.Map TName Type
 
-type TypeCheck = State FreshCounter (TEnv, UEnv, Type)
+-- Monad transformer stack for TypeCheck:
+--
+--   State (fresh variable counter)
+--     ExceptT (TypeError)
+--       (TEnv, UEnv, Type)
+--
+type TypeCheck = ExceptT TypeError (State FreshCounter) (TEnv, UEnv, Type)
 
 -- TODO extract literal types to TLit, similar to "Literal" for expressions?
 data Type = TInt
@@ -27,16 +35,36 @@ data Type = TInt
           | TFun Type Type
           | TList Type
           | TVec Type
-          | TFree
           | TVar TName -- Type variable.
-  deriving (Show, Eq)
+  deriving (Eq)
+
+instance Show Type where
+  show TInt = "Int"
+  show TBool = "Bool"
+  show TString = "String"
+  show (TFun a r) = "(-> " ++ show a ++ " " ++ show r ++ ")"
+  show (TList a) = "(Vector " ++ show a ++ ")"
+  show (TVec a) = "[" ++ show a ++ "]"
+  show (TVar n) = n
 
 data TypeError = Mismatch Type Type
                | UnboundVariable Name
                | InfiniteType Type Type -- InfiteType TVar Type
-               | GenericTypeError
+               | GenericTypeError (Maybe String)
 
-  deriving (Show)
+
+emptyGenericTypeError :: TypeError
+emptyGenericTypeError = GenericTypeError Nothing
+
+genericTypeError :: String -> TypeError
+genericTypeError msg = GenericTypeError (Just msg)
+
+instance Show TypeError where
+  show (Mismatch t1 t2) = "type mismatch: expecting " ++ show t1 ++ " but got " ++ show t2
+  show (UnboundVariable n) = "unbound variable " ++ n
+  show (InfiniteType tvar t) = "cannot resolve infintie type " ++ show tvar ++ " in " ++ show t
+  show (GenericTypeError (Just msg)) = "type error: " ++ msg
+  show (GenericTypeError Nothing) = "type error"
 
 newtype FreshCounter = FreshCounter { getFreshCounter :: Int }
 
@@ -294,7 +322,7 @@ checkLiteral :: TEnv -> UEnv -> Exp -> TypeCheck
 checkLiteral tenv uenv (Literal (IntV _)) = return (tenv, uenv, TInt)
 checkLiteral tenv uenv (Literal (BoolV _)) = return (tenv, uenv, TBool)
 checkLiteral tenv uenv (Literal (StringV _)) = return (tenv, uenv, TString)
-checkLiteral _ _ _ = error "Invalid"
+checkLiteral _ _ _ = throwError emptyGenericTypeError
 
 -- | Check variable.
 --
@@ -308,7 +336,7 @@ checkVar :: TEnv -> UEnv -> Exp -> TypeCheck
 checkVar tenv uenv (Var v) =
   case lookupEnv tenv v of
     Just t  -> return (tenv, uenv, t)
-    Nothing -> error "unbounded variable"
+    Nothing -> throwError (UnboundVariable v)
 checkVar _ _ _ = error "wrong type"
 
 -- | Check let.
@@ -329,7 +357,7 @@ checkLet tenv uenv (Let (Var v) val body) = do
   (_, uenv'', valB) <- checkExp tenv'' uenv' body
   -- Return original tenv because 'v' is no longer in scope.
   return (tenv, uenv'', valB)
-checkLet _ _ _ = error "wrong type"
+checkLet _ _ _ = throwError emptyGenericTypeError
 
 -- | Check nullary function.
 --
@@ -341,7 +369,7 @@ checkLet _ _ _ = error "wrong type"
 --
 checkNullFun :: TEnv -> UEnv -> Exp -> TypeCheck
 checkNullFun tenv uenv (NullaryFun body) = checkExp tenv uenv body
-checkNullFun _ _ _ = error "wrong type"
+checkNullFun _ _ _ = throwError emptyGenericTypeError
 
 -- | Check function.
 --
@@ -380,7 +408,7 @@ checkFun tenv uenv (Function (Var v) body) = do
   -- May have figured out argument's type when body was checked.
   let argT = fromMaybe (TVar v) (lookupEnv tenv'' v)
   return (tenv, uenv', TFun (replaceAllTVars uenv' argT) bodyT)
-checkFun _ _ _ = error "wrong type"
+checkFun _ _ _ = throwError emptyGenericTypeError
 
 -- | Check nullary function call.
 --
@@ -396,7 +424,7 @@ checkFun _ _ _ = error "wrong type"
 checkNullCall :: TEnv -> UEnv -> Exp -> TypeCheck
 checkNullCall tenv uenv (NullaryCall (Var v)) = checkExp tenv uenv (Var v)
 checkNullCall tenv uenv (NullaryCall (NullaryFun body)) = checkExp tenv uenv (NullaryFun body)
-checkNullCall _ _ _ = error "wrong type"
+checkNullCall _ _ _ = throwError emptyGenericTypeError
 
 -- | Check unary function call.
 --
@@ -576,8 +604,12 @@ checkUnaryCall tenv uenv (UnaryCall fn arg) = do
                tenv' = insertEnv tenv vT (TFun argT retT)
            in return (tenv', uenv'', retT)
       else return (tenv, uenv'', TFun (TVar "free") (TVar "free"))
-    _ -> error "calling a non-function"
-checkUnaryCall _ _ _ = error "wrong type"
+    t -> (do
+      -- Find argument type for better error message.
+      -- TODO: getFresh
+      (_, _, argT) <- checkExp tenv uenv' arg
+      throwError (Mismatch (TFun argT (TVar "free")) t))
+checkUnaryCall _ _ _ = throwError emptyGenericTypeError
 
 -- | Check list.
 --
@@ -595,7 +627,7 @@ checkUnaryCall _ _ _ = error "wrong type"
 -- TODO: need to use a TVar with non-clashing variable name.
 --
 checkList :: TEnv -> UEnv -> Exp -> TypeCheck
-checkList tenv uenv (List []) = return (tenv, uenv, TList TFree)
+checkList tenv uenv (List []) = return (tenv, uenv, TList (TVar "free"))
 checkList tenv uenv (List [e]) = do
   (_, uenv', eT) <- checkExp tenv uenv e
   return (tenv, uenv', TList eT)
@@ -674,5 +706,6 @@ checkExp _ _ (Add {}) = error "TODO"
 
 check :: TEnv -> UEnv -> Exp -> (TEnv, UEnv, Type)
 check tenv uenv expr =
-  let ((tenv', uenv', t), _) = runState (checkExp tenv uenv expr) initFreshCounter
-  in (tenv', uenv', t)
+  case evalState (runExceptT (checkExp tenv uenv expr)) initFreshCounter of
+    Left e -> error (show e)
+    Right r -> r
