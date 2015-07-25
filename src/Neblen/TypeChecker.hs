@@ -6,6 +6,7 @@ import Neblen.Data
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as S
+import Control.Monad
 import Control.Monad.Trans.State
 import Control.Monad.Trans.Except
 
@@ -27,31 +28,76 @@ getFresh = do
   let c = getFreshCounter s
   return $ letters !! c
 
+-- Mapping of variables to its type.
+type TEnv = M.Map Name Type
+
+-- Type variable.
+type TName = String
+
+-- Unification tenvironment. Mapping of type variables to its type.
+type UEnv = M.Map TName Type
+
+-- Monad transformer stack for TypeCheck:
+--
+--   State (fresh variable counter)
+--     ExceptT (TypeError)
+--       (TEnv, UEnv, Type)
+--
+type TypeCheck = ExceptT TypeError (State FreshCounter) (TEnv, UEnv, Type)
+
+type UnifyCheck = ExceptT TypeError (State FreshCounter) (UEnv, Type)
+
+-- TODO extract literal types to TLit, similar to "Literal" for expressions?
+data Type = TInt
+          | TBool
+          | TString
+          | TFun Type Type
+          | TList Type
+          | TVec Type
+          | TVar TName -- Type variable.
+  deriving (Eq)
+
+instance Show Type where
+  show TInt = "Int"
+  show TBool = "Bool"
+  show TString = "String"
+  show (TFun a r) = "(-> " ++ show a ++ " " ++ show r ++ ")"
+  show (TList a) = "(Vector " ++ show a ++ ")"
+  show (TVec a) = "[" ++ show a ++ "]"
+  show (TVar n) = n
+
+data TypeError = Mismatch Type Type
+               | UnboundVariable Name
+               | InfiniteType Type Type -- InfiteType TVar Type
+               | GenericTypeError (Maybe String)
+  deriving (Eq)
+
+
+emptyGenericTypeError :: TypeError
+emptyGenericTypeError = GenericTypeError Nothing
+
+genericTypeError :: String -> TypeError
+genericTypeError msg = GenericTypeError (Just msg)
+
+instance Show TypeError where
+  show (Mismatch t1 t2) = "type mismatch: expecting " ++ show t1 ++ " but got " ++ show t2
+  show (UnboundVariable n) = "unbound variable " ++ n
+  show (InfiniteType tvar t) = "cannot resolve infinite type " ++ show tvar ++ " in " ++ show t
+  show (GenericTypeError (Just msg)) = "type error: " ++ msg
+  show (GenericTypeError Nothing) = "type error"
+
+newtype FreshCounter = FreshCounter { getFreshCounter :: Int }
+
+initFreshCounter :: FreshCounter
+initFreshCounter = FreshCounter { getFreshCounter = 0 }
+
+letters :: [String]
+letters = [1..] >>= flip replicateM ['a'..'z']
+
 -- | Unify types.
---
--- >>> unify emptyUEnv TInt TInt
--- (fromList [],Int)
---
--- >>> unify emptyUEnv TInt (TVar "a")
--- (fromList [("a",Int)],Int)
---
--- >>> unify (M.fromList [("a",TInt)]) (TVar "a") (TVar "b")
--- (fromList [("a",Int),("b",Int)],Int)
---
--- >>> unify emptyUEnv (TFun TInt TInt) (TFun (TVar "a") (TVar "b"))
--- (fromList [("a",Int),("b",Int)],TFun Int Int)
 --
 -- >>> unify emptyUEnv (TFun TInt (TVar "a")) (TFun (TVar "a") (TVar "b"))
 -- (fromList [("a",Int),("b",Int)],TFun Int Int)
---
--- >>> unify emptyUEnv (TFun TInt (TVar "a")) (TFun (TVar "b") (TVar "b"))
--- (fromList [("a",Int),("b",Int)],TFun Int Int)
---
--- >>> unify (M.fromList [("b",TBool)]) (TFun (TVar "a") (TVar "a")) (TFun (TVar "a") (TVar "b"))
--- (fromList [("a",TBool),("b",TBool)],TFun TBool TBool)
---
--- >>> unify (M.fromList [("a",TInt)]) (TFun (TVar "a") (TVar "b")) (TFun (TVar "a") (TVar "b"))
--- (fromList [("a",Int)],TFun Int (TVar "b"))
 --
 -- >>> unify (M.fromList [("b",TBool)]) (TFun (TVar "a") (TVar "b")) (TFun (TVar "c") (TVar "d"))
 -- (fromList [("a",TVar "c"),("b",TBool),("c",TVar "a"),("d",TBool)],TFun (TVar "c") TBool)
@@ -73,21 +119,21 @@ getFresh = do
 -- >>> unify emptyUEnv (TVar "a") (TFun (TVar "a") TInt)
 -- *** Exception: infinite type: TVar "a" and TFun (TVar "a") TInt
 --
-unify :: UEnv -> Type -> Type -> (UEnv, Type)
-unify uenv TInt TInt = (uenv, TInt)
-unify uenv TBool TBool = (uenv, TBool)
-unify uenv TString TString = (uenv, TString)
+unify :: UEnv -> Type -> Type -> UnifyCheck
+unify uenv TInt TInt = return (uenv, TInt)
+unify uenv TBool TBool = return (uenv, TBool)
+unify uenv TString TString = return (uenv, TString)
 unify uenv (TVar tv) t2 = unifyTVar uenv (TVar tv) t2
 unify uenv t1 (TVar tv) = unifyTVar uenv (TVar tv) t1
-unify uenv (TFun a1 r1) (TFun a2 r2) =
-  let (uenv', ta) = unify uenv a1 a2
-      (uenv'', tr) = unify uenv' r1 r2
+unify uenv (TFun a1 r1) (TFun a2 r2) = do
+  (uenv', ta) <- unify uenv a1 a2
+  (uenv'', tr) <- unify uenv' r1 r2
   -- We now have a u-env built from both argument and return types. Substitue
   -- any remaining type variables.
-  in (uenv'', TFun (replaceAllTVars uenv'' ta) (replaceAllTVars uenv'' tr))
-unify _ t1 t2 = error $ "type mismatch: expecting " ++ show t1 ++ " but got " ++ show t2
+  return (uenv'', TFun (replaceAllTVars uenv'' ta) (replaceAllTVars uenv'' tr))
+unify _ t1 t2 = throwE $ Mismatch t1 t2
 
-unifyTVar :: UEnv -> Type -> Type -> (UEnv, Type)
+unifyTVar :: UEnv -> Type -> Type -> UnifyCheck
 unifyTVar uenv (TVar tv) t2 =
   case lookupEnv uenv tv of
     Nothing ->
@@ -100,17 +146,17 @@ unifyTVar uenv (TVar tv) t2 =
                       Nothing -> if tv == tv2
                                  -- Same free variable. Return this free
                                  -- variable.
-                                 then (uenv, TVar tv2)
+                                 then return (uenv, TVar tv2)
 
                                  else if occursCheck tv t2
-                                 then error $ "infinite type: " ++ show (TVar tv) ++ " and " ++ show t2
+                                 then (throwE $ InfiniteType (TVar tv) t2)
 
                                  -- Unify free variables together.
                                  --
                                  -- Example: a <==> b.
                                  -- UEnv: {a -> b, b -> a}
                                  -- Returned: a
-                                 else (insertEnv (insertEnv uenv tv (TVar tv2)) tv2 (TVar tv), TVar tv)
+                                 else return (insertEnv (insertEnv uenv tv (TVar tv2)) tv2 (TVar tv), TVar tv)
 
                       -- Resolved RHS. In the example above, b (RHS) is resolved to
                       -- Int. So we need to update uenv to {b -> Int, a -> Int}
@@ -118,12 +164,15 @@ unifyTVar uenv (TVar tv) t2 =
                                       uenv'' = insertEnv uenv' tv t2'
                                   in unify (insertEnv uenv'' tv2 t2') (TVar tv2) t2'
         _      -> if occursCheck tv t2
-                  then error $ "infinite type: " ++ show (TVar tv) ++ " and " ++ show t2
+                  then throwE $ InfiniteType (TVar tv) t2
                   else let uenv' = insertEnv uenv tv t2
                        in unify uenv' (TVar tv) t2
     Just t1 ->
       unify uenv t1 t2
 unifyTVar _ _ _ = error "bad call to unifyTVar"
+
+runUnify :: UnifyCheck -> Either TypeError (UEnv, Type)
+runUnify uc = evalState (runExceptT uc) initFreshCounter
 
 -- This occurs check asserts that if we are applying a substitution of variable
 -- x to an expression e, the variable x cannot be free in e. Otherwise the
@@ -491,7 +540,7 @@ checkUnaryCall tenv uenv (UnaryCall fn arg) = do
   case fnT of
     (TFun fna fnb) -> do
       (_, uenv'', argT) <- checkExp tenv uenv' arg
-      let (uenv''', _) = unify uenv'' fna argT
+      (uenv''', _) <- unify uenv'' fna argT
       return (tenv, uenv''', replaceAllTVars uenv''' fnb)
       -- in if isBound fna && fna /= argT
       --    -- Function doesn't take the type given by the argument body:
