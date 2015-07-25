@@ -4,15 +4,10 @@ import Neblen.Data
 import Neblen.Compiler
 import System.Console.Haskeline
 import System.Process
-import Control.Monad.Trans
-
--- TODO call out to node and print result:
---
--- node -e "3+4" -p
+import Control.Monad.IO.Class
 
 execJS :: JSProgram -> IO String
-execJS p = do
-  readProcess "node" ["-p"] p
+execJS = readProcess "node" ["-p"]
 
 main :: IO ()
 main = runInputT defaultSettings loop
@@ -25,5 +20,5 @@ main = runInputT defaultSettings loop
         let js = compile input
         answer <- liftIO (execJS js)
         -- outputStrLn $ js
-        outputStrLn $ answer
+        outputStrLn answer
         loop

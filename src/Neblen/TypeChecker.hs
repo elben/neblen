@@ -6,73 +6,12 @@ import Neblen.Data
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as S
-import Control.Monad
 import Control.Monad.Trans.State
 import Control.Monad.Trans.Except
 
-
--- Mapping of variables to its type.
-type TEnv = M.Map Name Type
-
--- Type variable.
-type TName = String
-
--- Unification tenvironment. Mapping of type variables to its type.
-type UEnv = M.Map TName Type
-
--- Monad transformer stack for TypeCheck:
---
---   State (fresh variable counter)
---     ExceptT (TypeError)
---       (TEnv, UEnv, Type)
---
-type TypeCheck = ExceptT TypeError (State FreshCounter) (TEnv, UEnv, Type)
-
--- TODO extract literal types to TLit, similar to "Literal" for expressions?
-data Type = TInt
-          | TBool
-          | TString
-          | TFun Type Type
-          | TList Type
-          | TVec Type
-          | TVar TName -- Type variable.
-  deriving (Eq)
-
-instance Show Type where
-  show TInt = "Int"
-  show TBool = "Bool"
-  show TString = "String"
-  show (TFun a r) = "(-> " ++ show a ++ " " ++ show r ++ ")"
-  show (TList a) = "(Vector " ++ show a ++ ")"
-  show (TVec a) = "[" ++ show a ++ "]"
-  show (TVar n) = n
-
-data TypeError = Mismatch Type Type
-               | UnboundVariable Name
-               | InfiniteType Type Type -- InfiteType TVar Type
-               | GenericTypeError (Maybe String)
-
-
-emptyGenericTypeError :: TypeError
-emptyGenericTypeError = GenericTypeError Nothing
-
-genericTypeError :: String -> TypeError
-genericTypeError msg = GenericTypeError (Just msg)
-
-instance Show TypeError where
-  show (Mismatch t1 t2) = "type mismatch: expecting " ++ show t1 ++ " but got " ++ show t2
-  show (UnboundVariable n) = "unbound variable " ++ n
-  show (InfiniteType tvar t) = "cannot resolve infintie type " ++ show tvar ++ " in " ++ show t
-  show (GenericTypeError (Just msg)) = "type error: " ++ msg
-  show (GenericTypeError Nothing) = "type error"
-
-newtype FreshCounter = FreshCounter { getFreshCounter :: Int }
-
-initFreshCounter :: FreshCounter
-initFreshCounter = FreshCounter { getFreshCounter = 0 }
-
-letters :: [String]
-letters = [1..] >>= flip replicateM ['a'..'z']
+-- TODO:
+-- - [ ] use getFresh for fresh variables where appropiate
+-- - [ ] Except monad.
 
 -- | Get fresh variable.
 --
@@ -91,28 +30,28 @@ getFresh = do
 -- | Unify types.
 --
 -- >>> unify emptyUEnv TInt TInt
--- (fromList [],TInt)
+-- (fromList [],Int)
 --
 -- >>> unify emptyUEnv TInt (TVar "a")
--- (fromList [("a",TInt)],TInt)
+-- (fromList [("a",Int)],Int)
 --
 -- >>> unify (M.fromList [("a",TInt)]) (TVar "a") (TVar "b")
--- (fromList [("a",TInt),("b",TInt)],TInt)
+-- (fromList [("a",Int),("b",Int)],Int)
 --
 -- >>> unify emptyUEnv (TFun TInt TInt) (TFun (TVar "a") (TVar "b"))
--- (fromList [("a",TInt),("b",TInt)],TFun TInt TInt)
+-- (fromList [("a",Int),("b",Int)],TFun Int Int)
 --
 -- >>> unify emptyUEnv (TFun TInt (TVar "a")) (TFun (TVar "a") (TVar "b"))
--- (fromList [("a",TInt),("b",TInt)],TFun TInt TInt)
+-- (fromList [("a",Int),("b",Int)],TFun Int Int)
 --
 -- >>> unify emptyUEnv (TFun TInt (TVar "a")) (TFun (TVar "b") (TVar "b"))
--- (fromList [("a",TInt),("b",TInt)],TFun TInt TInt)
+-- (fromList [("a",Int),("b",Int)],TFun Int Int)
 --
 -- >>> unify (M.fromList [("b",TBool)]) (TFun (TVar "a") (TVar "a")) (TFun (TVar "a") (TVar "b"))
 -- (fromList [("a",TBool),("b",TBool)],TFun TBool TBool)
 --
 -- >>> unify (M.fromList [("a",TInt)]) (TFun (TVar "a") (TVar "b")) (TFun (TVar "a") (TVar "b"))
--- (fromList [("a",TInt)],TFun TInt (TVar "b"))
+-- (fromList [("a",Int)],TFun Int (TVar "b"))
 --
 -- >>> unify (M.fromList [("b",TBool)]) (TFun (TVar "a") (TVar "b")) (TFun (TVar "c") (TVar "d"))
 -- (fromList [("a",TVar "c"),("b",TBool),("c",TVar "a"),("d",TBool)],TFun (TVar "c") TBool)
@@ -322,7 +261,7 @@ checkLiteral :: TEnv -> UEnv -> Exp -> TypeCheck
 checkLiteral tenv uenv (Literal (IntV _)) = return (tenv, uenv, TInt)
 checkLiteral tenv uenv (Literal (BoolV _)) = return (tenv, uenv, TBool)
 checkLiteral tenv uenv (Literal (StringV _)) = return (tenv, uenv, TString)
-checkLiteral _ _ _ = throwError emptyGenericTypeError
+checkLiteral _ _ _ = throwE emptyGenericTypeError
 
 -- | Check variable.
 --
@@ -336,7 +275,7 @@ checkVar :: TEnv -> UEnv -> Exp -> TypeCheck
 checkVar tenv uenv (Var v) =
   case lookupEnv tenv v of
     Just t  -> return (tenv, uenv, t)
-    Nothing -> throwError (UnboundVariable v)
+    Nothing -> throwE (UnboundVariable v)
 checkVar _ _ _ = error "wrong type"
 
 -- | Check let.
@@ -357,7 +296,7 @@ checkLet tenv uenv (Let (Var v) val body) = do
   (_, uenv'', valB) <- checkExp tenv'' uenv' body
   -- Return original tenv because 'v' is no longer in scope.
   return (tenv, uenv'', valB)
-checkLet _ _ _ = throwError emptyGenericTypeError
+checkLet _ _ _ = throwE emptyGenericTypeError
 
 -- | Check nullary function.
 --
@@ -369,7 +308,7 @@ checkLet _ _ _ = throwError emptyGenericTypeError
 --
 checkNullFun :: TEnv -> UEnv -> Exp -> TypeCheck
 checkNullFun tenv uenv (NullaryFun body) = checkExp tenv uenv body
-checkNullFun _ _ _ = throwError emptyGenericTypeError
+checkNullFun _ _ _ = throwE emptyGenericTypeError
 
 -- | Check function.
 --
@@ -408,7 +347,7 @@ checkFun tenv uenv (Function (Var v) body) = do
   -- May have figured out argument's type when body was checked.
   let argT = fromMaybe (TVar v) (lookupEnv tenv'' v)
   return (tenv, uenv', TFun (replaceAllTVars uenv' argT) bodyT)
-checkFun _ _ _ = throwError emptyGenericTypeError
+checkFun _ _ _ = throwE emptyGenericTypeError
 
 -- | Check nullary function call.
 --
@@ -424,7 +363,7 @@ checkFun _ _ _ = throwError emptyGenericTypeError
 checkNullCall :: TEnv -> UEnv -> Exp -> TypeCheck
 checkNullCall tenv uenv (NullaryCall (Var v)) = checkExp tenv uenv (Var v)
 checkNullCall tenv uenv (NullaryCall (NullaryFun body)) = checkExp tenv uenv (NullaryFun body)
-checkNullCall _ _ _ = throwError emptyGenericTypeError
+checkNullCall _ _ _ = throwE emptyGenericTypeError
 
 -- | Check unary function call.
 --
@@ -608,8 +547,8 @@ checkUnaryCall tenv uenv (UnaryCall fn arg) = do
       -- Find argument type for better error message.
       -- TODO: getFresh
       (_, _, argT) <- checkExp tenv uenv' arg
-      throwError (Mismatch (TFun argT (TVar "free")) t))
-checkUnaryCall _ _ _ = throwError emptyGenericTypeError
+      throwE (Mismatch (TFun argT (TVar "free")) t))
+checkUnaryCall _ _ _ = throwE emptyGenericTypeError
 
 -- | Check list.
 --
