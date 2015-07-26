@@ -105,20 +105,6 @@ letters = [1..] >>= flip replicateM ['a'..'z']
 -- >>> unify emptyUEnv (TFun (TVar "a") (TVar "a")) (TFun (TVar "a") (TVar "a"))
 -- (fromList [],TFun (TVar "a") (TVar "a"))
 --
--- Failure cases:
---
--- >>> unify (M.fromList [("a",TBool)]) (TVar "a") TInt
--- *** Exception: type mismatch: expecting TBool but got TInt
---
--- >>> unify emptyUEnv (TVar "a") (TFun (TVar "a") TInt)
--- *** Exception: infinite type: TVar "a" and TFun (TVar "a") TInt
---
--- >>> unify (M.fromList [("a",TBool)]) TInt (TVar "a")
--- *** Exception: type mismatch: expecting TBool but got TInt
---
--- >>> unify emptyUEnv (TVar "a") (TFun (TVar "a") TInt)
--- *** Exception: infinite type: TVar "a" and TFun (TVar "a") TInt
---
 unify :: UEnv -> Type -> Type -> UnifyCheck
 unify uenv TInt TInt = return (uenv, TInt)
 unify uenv TBool TBool = return (uenv, TBool)
@@ -143,20 +129,19 @@ unifyTVar uenv (TVar tv) t2 =
         -- LHS failed to resolve, so we try the RHS.
         TVar tv2 -> case lookupEnv uenv tv2 of
                       -- RHS is still free.
-                      Nothing -> if tv == tv2
-                                 -- Same free variable. Return this free
-                                 -- variable.
-                                 then return (uenv, TVar tv2)
+                      Nothing | tv == tv2  ->
+                                  -- Same free variable. Return this free
+                                  -- variable.
+                                  return (uenv, TVar tv2)
 
-                                 else if occursCheck tv t2
-                                 then (throwE $ InfiniteType (TVar tv) t2)
-
-                                 -- Unify free variables together.
-                                 --
-                                 -- Example: a <==> b.
-                                 -- UEnv: {a -> b, b -> a}
-                                 -- Returned: a
-                                 else return (insertEnv (insertEnv uenv tv (TVar tv2)) tv2 (TVar tv), TVar tv)
+                              | occursCheck tv t2 -> throwE $ InfiniteType (TVar tv) t2
+                              | otherwise ->
+                                  -- Unify free variables together.
+                                  --
+                                  -- Example: a <==> b.
+                                  -- UEnv: {a -> b, b -> a}
+                                  -- Returned: a
+                                  return (insertEnv (insertEnv uenv tv (TVar tv2)) tv2 (TVar tv), TVar tv)
 
                       -- Resolved RHS. In the example above, b (RHS) is resolved to
                       -- Int. So we need to update uenv to {b -> Int, a -> Int}
@@ -297,14 +282,7 @@ lookupEnv tenv name = M.lookup name tenv
 insertEnv :: TEnv -> Name -> Type -> TEnv
 insertEnv tenv name t = M.insert name t tenv
 
--- >>> check emptyTEnv emptyUEnv (Literal (IntV 0))
--- (fromList [],fromList [],TInt)
---
--- >>> check emptyTEnv emptyUEnv (Literal (BoolV True))
--- (fromList [],fromList [],TBool)
---
--- >>> check emptyTEnv emptyUEnv (Literal (StringV "Hello"))
--- (fromList [],fromList [],TString)
+-- Check literal.
 --
 checkLiteral :: TEnv -> UEnv -> Exp -> TypeCheck
 checkLiteral tenv uenv (Literal (IntV _)) = return (tenv, uenv, TInt)
@@ -313,12 +291,6 @@ checkLiteral tenv uenv (Literal (StringV _)) = return (tenv, uenv, TString)
 checkLiteral _ _ _ = throwE emptyGenericTypeError
 
 -- | Check variable.
---
--- >>> check (M.fromList [("x",TInt)]) emptyUEnv (Var "x")
--- (fromList [("x",TInt)],fromList [],TInt)
---
--- >>> check emptyTEnv emptyUEnv (Var "x")
--- (fromList *** Exception: unbounded variable
 --
 checkVar :: TEnv -> UEnv -> Exp -> TypeCheck
 checkVar tenv uenv (Var v) =
@@ -332,12 +304,6 @@ checkVar _ _ _ = error "wrong type"
 -- >>> check emptyTEnv emptyUEnv (Let (Var "x") (Literal (IntV 0)) (Var "x"))
 -- (fromList [],fromList [],TInt)
 --
--- >>> check emptyTEnv emptyUEnv (Let (Var "x") (Literal (IntV 0)) (Literal (BoolV True)))
--- (fromList [],fromList [],TBool)
---
--- >>> check (M.fromList [("b",TBool)]) emptyUEnv (Let (Var "x") (Literal (IntV 0)) (Var "b"))
--- (fromList [("b",TBool)],fromList [],TBool)
---
 checkLet :: TEnv -> UEnv -> Exp -> TypeCheck
 checkLet tenv uenv (Let (Var v) val body) = do
   (tenv', uenv', valT) <- checkExp tenv uenv val
@@ -349,41 +315,15 @@ checkLet _ _ _ = throwE emptyGenericTypeError
 
 -- | Check nullary function.
 --
--- >>> check emptyTEnv emptyUEnv (NullaryFun (Literal (IntV 0)))
--- (fromList [],fromList [],TInt)
---
--- >>> check emptyTEnv emptyUEnv (NullaryFun (Var "x"))
--- (fromList *** Exception: unbounded variable
---
 checkNullFun :: TEnv -> UEnv -> Exp -> TypeCheck
 checkNullFun tenv uenv (NullaryFun body) = checkExp tenv uenv body
 checkNullFun _ _ _ = throwE emptyGenericTypeError
 
 -- | Check function.
 --
--- >>> check emptyTEnv emptyUEnv (Function (Var "x") (Var "x"))
--- (fromList [],fromList [],TFun (TVar "x") (TVar "x"))
---
--- >>> check emptyTEnv emptyUEnv (Function (Var "x") (Literal (IntV 0)))
--- (fromList [],fromList [],TFun (TVar "x") TInt)
---
--- >>> check emptyTEnv emptyUEnv (Function (Var "x") (Function (Var "y") (Literal (IntV 0))))
--- (fromList [],fromList [],TFun (TVar "x") (TFun (TVar "y") TInt))
---
--- Verify that argument variable doesn't override outside scope:
---   Environment: x : Bool
---   (fn [x] (fn [y] 0))
---
--- >>> check (M.fromList [("x",TBool)]) emptyUEnv (Function (Var "x") (Function (Var "y") (Literal (IntV 0))))
--- (fromList [("x",TBool)],fromList [],TFun (TVar "x") (TFun (TVar "y") TInt))
---
 -- Below is: (fn [x] (fn [y] x))
 -- >>> check emptyTEnv emptyUEnv (Function (Var "x") (Function (Var "y") (Var "x")))
 -- (fromList [],fromList [],TFun (TVar "x") (TFun (TVar "y") (TVar "x")))
---
--- Below is: (fn [x] x x)
--- >>> check emptyTEnv emptyUEnv (Function (Var "x") (UnaryCall (Var "x") (Var "x")))
--- (fromList [],fromList [],TFun (TVar "x") (TFun (TVar "x") (TVar "x")))
 --
 -- Below is: (fn [x] x 3)
 -- >>> check emptyTEnv emptyUEnv (Function (Var "x") (UnaryCall (Var "x") (Literal (IntV 3))))
@@ -403,53 +343,12 @@ checkFun _ _ _ = throwE emptyGenericTypeError
 -- >>> check (M.fromList [("x",TBool)]) emptyUEnv (NullaryCall (Var "x"))
 -- (fromList [("x",TBool)],fromList [],TBool)
 --
--- >>> check emptyTEnv emptyUEnv (NullaryCall (NullaryFun (Literal (BoolV True))))
--- (fromList [],fromList [],TBool)
---
--- >>> check emptyTEnv emptyUEnv (NullaryCall (Var "x"))
--- (fromList *** Exception: unbounded variable
---
 checkNullCall :: TEnv -> UEnv -> Exp -> TypeCheck
 checkNullCall tenv uenv (NullaryCall (Var v)) = checkExp tenv uenv (Var v)
 checkNullCall tenv uenv (NullaryCall (NullaryFun body)) = checkExp tenv uenv (NullaryFun body)
 checkNullCall _ _ _ = throwE emptyGenericTypeError
 
 -- | Check unary function call.
---
--- >>> check (M.fromList [("x",TFun TInt TBool)]) emptyUEnv (UnaryCall (Var "x") (Literal (IntV 0)))
--- (fromList [("x",TFun TInt TBool)],fromList [],TBool)
---
--- Below is the case:
---   Environment:
---     f : (-> Bool Bool)
---   (let [x true] (f x))
---
--- >>> check (M.fromList [("f",TFun TBool TBool)]) emptyUEnv (Let (Var "x") (Literal (BoolV True)) (UnaryCall (Var "f") (Var "x")))
--- (fromList [("f",TFun TBool TBool)],fromList [],TBool)
---
--- Below is the case:
---   Environment:
---     f : (-> Int Bool)
---   ((fn [x] x) f)
---
--- >>> check (M.fromList [("f",TFun TInt TBool)]) emptyUEnv (UnaryCall (Function (Var "x") (Var "x")) (Var "f"))
--- (fromList [("f",TFun TInt TBool)],fromList [("x",TFun TInt TBool)],TFun TInt TBool)
---
--- Below is: (let [x (fn [y] y)] (x 3))
--- >>> check emptyTEnv emptyUEnv (Let (Var "x") (Function (Var "y") (Var "y")) (UnaryCall (Var "x") (Literal (IntV 3))))
--- (fromList [],fromList [("y",TInt)],TInt)
---
--- Below is: (let [x (fn [y] y)] (x (x 3)))
--- >>> check emptyTEnv emptyUEnv (Let (Var "x") (Function (Var "y") (Var "y")) (UnaryCall (Var "x") (UnaryCall (Var "x") (Literal (IntV 3)))))
--- (fromList [],fromList [("y",TInt)],TInt)
---
--- Below is: ((fn [x] x) 0)
--- >>> check emptyTEnv emptyUEnv (UnaryCall (Function (Var "x") (Var "x")) (Literal (IntV 0)))
--- (fromList [],fromList [("x",TInt)],TInt)
---
--- Below is: ((fn [x] (fn [y] x)) 0)
--- >>> check emptyTEnv emptyUEnv (UnaryCall (Function (Var "x") (Function (Var "y") (Var "x"))) (Literal (IntV 0)))
--- (fromList [],fromList [("x",TInt)],TFun (TVar "y") TInt)
 --
 -- Below is: ((fn [x] (fn [y] x)) 0 True)
 -- >>> check emptyTEnv emptyUEnv (UnaryCall (UnaryCall (Function (Var "x") (Function (Var "y") (Var "x"))) (Literal (IntV 0))) (Literal (BoolV True)))
@@ -459,15 +358,6 @@ checkNullCall _ _ _ = throwE emptyGenericTypeError
 -- >>> check emptyTEnv emptyUEnv (UnaryCall (Function (Var "x") (UnaryCall (Var "x") (Literal (IntV 3)))) (Function (Var "x") (Var "x")))
 -- (fromList [],fromList [("stillfree",TInt),("x",TInt)],TInt)
 --
--- >>> check emptyTEnv emptyUEnv (UnaryCall (Var "x") (Literal (IntV 0)))
--- (fromList *** Exception: unbounded variable
---
--- >>> check (M.fromList [("x",TInt)]) emptyUEnv (UnaryCall (Var "x") (Literal (IntV 0)))
--- (fromList *** Exception: calling a non-function
---
--- Below is: (let [x (fn [y] y)] (x x))
--- >>> check emptyTEnv emptyUEnv (Let (Var "x") (Function (Var "y") (Var "y")) (UnaryCall (Var "x") (Var "x")))
--- (fromList [],fromList *** Exception: infinite type: TVar "y" and TFun (TVar "y") (TVar "y")
 --
 -- Below is:
 --   Environment: x : (-> Bool Int)
@@ -592,11 +482,11 @@ checkUnaryCall tenv uenv (UnaryCall fn arg) = do
                tenv' = insertEnv tenv vT (TFun argT retT)
            in return (tenv', uenv'', retT)
       else return (tenv, uenv'', TFun (TVar "free") (TVar "free"))
-    t -> (do
+    t -> do
       -- Find argument type for better error message.
       -- TODO: getFresh
       (_, _, argT) <- checkExp tenv uenv' arg
-      throwE (Mismatch (TFun argT (TVar "free")) t))
+      throwE (Mismatch (TFun argT (TVar "free")) t)
 checkUnaryCall _ _ _ = throwE emptyGenericTypeError
 
 -- | Check list.
