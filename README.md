@@ -10,6 +10,8 @@ cabal install --only-dep
 # Tests
 
 ```
+cabal test
+
 doctest -isrc -Wall -fno-warn-type-defaults -fno-warn-unused-do-bind src/Neblen/Parser.hs
 ```
 

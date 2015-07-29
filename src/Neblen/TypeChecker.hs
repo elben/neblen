@@ -453,16 +453,16 @@ checkUnaryCall tenv uenv (UnaryCall fn arg) = do
   --   run (checkExp emptyTEnv emptyUEnv (Function (Var "a") (Function (Var "x") (UnaryCall (Var "a") (Var "x")))))
   --   @?= (M.fromList [],M.fromList [],TFun (TFun (TVar "a") (TVar "b")) (TVar "b"))
   --
-    (TVar vT) -> do
+    (TVar fnVarT) -> do
       (_, uenv'', argT) <- checkExp tenv uenv' arg
       if isBound argT
       then do
-        (uenv''', t) <- unify uenv'' (TVar vT) argT
-        retT <- getFresh
+        fnbT <- getFresh
+        (uenv''', fnT') <- unify uenv'' (TVar fnVarT) (TFun argT fnbT)
         -- We partially know the type of the function. Add that to
         -- the tenv so that parent can use it in their type check.
-        let tenv' = insertEnv tenv vT (TFun t retT)
-        return (tenv', uenv''', retT)
+        let tenv' = insertEnv tenv fnVarT fnT'
+        return (tenv', uenv''', funReturnType fnT')
       else do
         -- We have something like: (x y), where x is free. That is, we have:
         --
@@ -472,8 +472,8 @@ checkUnaryCall tenv uenv (UnaryCall fn arg) = do
         -- So, unify: x <=> (-> a ?)
         --
         fnbT <- getFresh
-        (_, fnT') <- unify uenv'' (TVar vT) (TFun argT fnbT)
-        let tenv' = insertEnv tenv vT fnT'
+        (_, fnT') <- unify uenv'' (TVar fnVarT) (TFun argT fnbT)
+        let tenv' = insertEnv tenv fnVarT fnT'
         return (tenv', uenv'', funReturnType fnT')
     t -> do
       -- Find argument type for better error message.
