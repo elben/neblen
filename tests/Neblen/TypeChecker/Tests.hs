@@ -166,7 +166,11 @@ testCheckFun =
 
   , testCase "checkfun: (fn [x] x 3)" $
     run (checkExp emptyTEnv emptyUEnv (Function (Var "x") (UnaryCall (Var "x") (Literal (IntV 3)))))
-    @?= (M.fromList [],M.fromList [],TFun (TFun TInt (TVar "stillfree")) (TVar "stillfree"))
+    @?= (M.fromList [],M.fromList [],TFun (TFun TInt (TVar "a")) (TVar "a"))
+
+  , testCase "checkfun: (fn [a] (fn [x] (a x))) : (-> (-> a b) (-> a b))" $
+    run (checkExp emptyTEnv emptyUEnv (Function (Var "a") (Function (Var "x") (UnaryCall (Var "a") (Var "x")))))
+    @?= (M.fromList [],M.fromList [],TFun (TFun (TVar "a") (TVar "b")) (TFun (TVar "a") (TVar "b")))
 
   , testCase "checkfun: (fn [x] x x)" $
     run (checkExp emptyTEnv emptyUEnv (Function (Var "x") (UnaryCall (Var "x") (Var "x"))))
@@ -239,5 +243,17 @@ testCheckUnaryCall =
   , testCase "checkUnaryCall: (let [x (fn [y] y)] (x x))" $
     expectE (checkExp emptyTEnv emptyUEnv (Let (Var "x") (Function (Var "y") (Var "y")) (UnaryCall (Var "x") (Var "x"))))
     @?= UnboundVariable "x"
+
+  , testCase "checkUnaryCall:\n\
+            \ x : (-> Bool Int)\n\
+            \ (x 0)" $
+    expectE (checkExp (M.fromList [("x",TFun TBool TInt)]) emptyUEnv (UnaryCall (Var "x") (Literal (IntV 0))))
+    @?= UnboundVariable "x"
+
+  , testCase "checkUnaryCall:\n\
+            \ x : (-> a a)\n\
+            \ ((fn [y] y 3) x) : Int" $
+    run (checkExp (M.fromList [("x", TFun (TVar "a") (TVar "a"))]) emptyUEnv (UnaryCall (Function (Var "y") (UnaryCall (Var "y") (Literal (IntV 3)))) (Var "x")))
+    @?= (M.fromList [("x",(TFun (TVar "a") (TVar "a")))],M.fromList [("a",TInt)],TInt)
   ]
 
