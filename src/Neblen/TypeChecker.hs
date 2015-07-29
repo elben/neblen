@@ -12,7 +12,6 @@ import Control.Monad.Trans.Except
 
 -- TODO:
 -- - [ ] use getFresh for fresh variables where appropiate
--- - [ ] Except monad.
 
 -- | Get fresh variable.
 --
@@ -22,11 +21,11 @@ import Control.Monad.Trans.Except
 -- >>> evalState getFresh (FreshCounter { getFreshCounter = 25 })
 -- "z"
 --
-getFresh :: State FreshCounter TName
+getFresh :: ExceptT TypeError (State FreshCounter) Type
 getFresh = do
   s <- get
-  let c = getFreshCounter s
-  return $ letters !! c
+  put s{getFreshCounter = getFreshCounter s + 1}
+  return $ TVar (letters !! getFreshCounter s)
 
 -- Mapping of variables to its type.
 type TEnv = M.Map Name Type
@@ -476,11 +475,12 @@ checkUnaryCall tenv uenv (UnaryCall fn arg) = do
     (TVar vT) -> do
       (_, uenv'', argT) <- checkExp tenv uenv' arg
       if isBound argT
-      then let retT = TVar "stillfree"
-               -- We partially know the type of the function. Add that to
-               -- the tenv so that parent can use it in their type check.
-               tenv' = insertEnv tenv vT (TFun argT retT)
-           in return (tenv', uenv'', retT)
+      then (do
+        retT <- getFresh
+        -- We partially know the type of the function. Add that to
+        -- the tenv so that parent can use it in their type check.
+        let tenv' = insertEnv tenv vT (TFun argT retT)
+        return (tenv', uenv'', retT))
       else return (tenv, uenv'', TFun (TVar "free") (TVar "free"))
     t -> do
       -- Find argument type for better error message.
