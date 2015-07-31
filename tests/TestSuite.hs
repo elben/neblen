@@ -13,8 +13,8 @@ runnerOpts = mempty {
 }
 
 main :: IO ()
-main = defaultMainWithOpts
-  [ Neblen.TypeChecker.Tests.tests
-  ]
-  runnerOpts
-
+main =
+  defaultMainWithOpts
+    [ Neblen.TypeChecker.Tests.tests
+    ]
+    runnerOpts

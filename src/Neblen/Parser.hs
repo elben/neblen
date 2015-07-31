@@ -225,16 +225,16 @@ parseEmptyList = try (string "()") A.*> A.pure (List [])
 parseList' :: Parser Exp
 parseList' = try (string "(list)") A.*> A.pure (List []) <|> try (parseListWithSurroundingPrefix (Just (string "list")) '(' ')' List)
 
--- | Parse vectors.
+-- | Parse vectors (which are just lists with different syntax, for now).
 --
 -- >>> parse parseVector "" "[]"
--- Right (Vector [])
+-- Right (List [])
 --
 -- >>> parse parseVector "" "[xyz-abc [0 \"foo\" true]]"
--- Right (Vector [Var "xyz-abc",Vector [Literal (IntV 0),Literal (StringV "foo"),Literal (BoolV True)]])
+-- Right (List [Var "xyz-abc",List [Literal (IntV 0),Literal (StringV "foo"),Literal (BoolV True)]])
 --
 parseVector :: Parser Exp
-parseVector = parseListWithSurrounding '[' ']' Vector
+parseVector = parseListWithSurrounding '[' ']' List
 
 parseExps :: Parser [Exp]
 parseExps = sepBy parseExp skipSpaces1
@@ -245,8 +245,10 @@ parseListWithSurroundingPrefix mp l r f = do
   case mp of
     Just s -> s A.*> skipSpaces1
     _      -> spaces
-  exps <- parseExps
+
   -- Must be separated by at least one space
+  exps <- parseExps
+
   _ <- char r
   return $ f exps
 
@@ -442,7 +444,7 @@ parseVarExpPair = do
 -- Right (Var "x")
 --
 -- >>> parse parseExp "" "[+ -]"
--- Right (Vector [Var "+",Var "-"])
+-- Right (List [Var "+",Var "-"])
 --
 -- >>> parse parseExp "" "(list + - abc)"
 -- Right (List [Var "+",Var "-",Var "abc"])
@@ -479,7 +481,7 @@ parseExp =
 -- | Parse a line of expression.
 --
 -- >>> parse parseLine "" "[+ - >>= abc-def 123]"
--- Right (Vector [Var "+",Var "-",Var ">>=",Var "abc-def",Literal (IntV 123)])
+-- Right (List [Var "+",Var "-",Var ">>=",Var "abc-def",Literal (IntV 123)])
 --
 -- >>> isLeft $ parse parseLine "" "+ 13"
 -- True

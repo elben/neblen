@@ -20,7 +20,6 @@ data Value = IntV Int
 
 data Exp = Literal Value
          | List [Exp]
-         | Vector [Exp]
          | Var Name          -- ^ Var "x"
          | Def Exp Exp       -- ^ Def (Var "x") Exp
          | Add Exp Exp

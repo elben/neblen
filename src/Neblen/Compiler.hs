@@ -145,7 +145,6 @@ emitIf _ _ = error "Invalid if statement."
 --
 emitExp :: Env -> Exp -> JSProgram
 emitExp _ (Literal v) = emitValue v
-emitExp env (Vector v) = emitVector env v
 emitExp env (List v) = emitVector env v
 emitExp _ (Var s) = xformVar s
 emitExp env (Def var expr) = emitDef env var expr
