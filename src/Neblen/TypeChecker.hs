@@ -60,6 +60,11 @@ instance Show Type where
   show (TVec a) = "Vector " ++ show a
   show (TVar n) = n
 
+-- Type schemes is a way to allow let-polymorphism (ML-style polymorphism):
+-- functions can be instantiated with different types in the same body. See
+-- Pierce 22.7 Let-Polymorphism (pg 331).
+data TypeScheme = Forall [TName] Type
+
 data TypeError = Mismatch Type Type
                | UnboundVariable Name
                | InfiniteType Type Type -- InfiniteType TVar Type
@@ -89,15 +94,6 @@ letters :: [String]
 letters = [1..] >>= flip replicateM ['a'..'z']
 
 -- | Unify types.
---
--- >>> runUnify $ unify emptyUEnv (TFun TInt (TVar "a")) (TFun (TVar "a") (TVar "b"))
--- Right (fromList [("a",Int),("b",Int)],(-> Int Int))
---
--- >>> runUnify $ unify (M.fromList [("b",TBool)]) (TFun (TVar "a") (TVar "b")) (TFun (TVar "c") (TVar "d"))
--- Right (fromList [("a",c),("b",Bool),("c",a),("d",Bool)],(-> c Bool))
---
--- >>> runUnify $ unify emptyUEnv (TFun (TVar "a") (TVar "a")) (TFun (TVar "a") (TVar "a"))
--- Right (fromList [],(-> a a))
 --
 unify :: UEnv -> Type -> Type -> TypeCheck (UEnv, Type)
 unify uenv TInt TInt = return (uenv, TInt)
@@ -319,22 +315,42 @@ checkNullFun _ _ _ = throwE emptyGenericTypeError
 
 -- | Check function.
 --
--- Below is: (fn [x] (fn [y] x))
--- >>> check emptyTEnv emptyUEnv (Function (Var "x") (Function (Var "y") (Var "x")))
--- (fromList [],fromList [],(-> x (-> y x)))
---
--- Below is: (fn [x] x 3)
--- >>> check emptyTEnv emptyUEnv (Function (Var "x") (UnaryCall (Var "x") (Literal (IntV 3))))
--- (fromList [],fromList [],(-> (-> Int a) a))
---
 checkFun :: TEnv -> UEnv -> Exp -> TypeCheck (TEnv, UEnv, Type)
 checkFun tenv uenv (Function (Var v) body) = do
+  -- Get fresh type variable for argument variable, and bind the arg var to this
+  -- type var.
   tv <- getFresh
   let tenv' = insertEnv tenv v tv -- TODO: need to insert another mapping for tv?
-  (tenv'', uenv', bodyT) <- checkExp tenv' uenv body -- Check body
-  -- May have figured out argument's type when body was checked.
-  let argT = fromMaybe (TVar v) (lookupEnv tenv'' v)
-  return (tenv'', uenv', TFun (replaceAllTVars uenv' argT) bodyT)
+
+  -- Check body
+  (tenv'', uenv', bodyT) <- checkExp tenv' uenv body
+
+  -- May have figured out argument's type when body was checked. If not, use the
+  -- fresh we got.
+  let argT = fromMaybe tv (lookupEnv tenv'' v)
+  -- let argT = fromMaybe (TVar v) (lookupEnv tenv'' v)
+
+  -- TODO: Do we need to return the updated tenv and uenv? Or the updated ones,
+  -- minus the ones that were bound by the function argument.
+  --
+  -- Can a function body update a variable's type?
+  --
+  -- (fn [x] (let [z (fn [y] (x 3))] x))
+  --
+  --     tenv: {}  uenv: {}
+  -- - From the outer fn, we getFresh for x.
+  --     tenv: {x -> a}  uenv: {}
+  -- - In the let binding, we find the inner function
+  --     tenv: {x -> a}  uenv: {}
+  -- - Infering the function type
+  --     tenv: {x -> a, y -> b}  uenv: {a -> (-> Int c)}
+  -- - Infered the function type, exiting
+  --     tenv: {x -> a}  uenv: {a -> (-> Int c)}
+  -- - Exit the let binding, going to the let body
+  --     tenv: {x -> a}  uenv: {a -> (-> Int c)}
+  -- - In the let body, type check x
+  --     tenv: {x -> a}  uenv: {a -> (-> Int c)}
+  return (tenv, uenv', TFun (replaceAllTVars uenv' argT) (replaceAllTVars uenv' bodyT))
 checkFun _ _ _ = throwE emptyGenericTypeError
 
 -- | Check nullary function call.
@@ -349,35 +365,7 @@ checkNullCall _ _ _ = throwE emptyGenericTypeError
 
 -- | Check unary function call.
 --
--- Below is: ((fn [x] (fn [y] x)) 0 True)
--- >>> check emptyTEnv emptyUEnv (UnaryCall (UnaryCall (Function (Var "x") (Function (Var "y") (Var "x"))) (Literal (IntV 0))) (Literal (BoolV True)))
--- (fromList [],fromList [("x",Int),("y",Bool)],Int)
---
--- Below is: ((fn [x] x 3) (fn [x] x))
--- >>> check emptyTEnv emptyUEnv (UnaryCall (Function (Var "x") (UnaryCall (Var "x") (Literal (IntV 3)))) (Function (Var "x") (Var "x")))
--- (fromList [],fromList [("a",Int),("x",Int)],Int)
---
--- Below is:
---   Environment: x : (-> Bool Int)
---   (x 0)
---
--- >>> check (M.fromList [("x",TFun TBool TInt)]) emptyUEnv (UnaryCall (Var "x") (Literal (IntV 0)))
--- *** Exception: type mismatch: expecting Bool but got Int
---
--- Below is:
---   Environment:
---     x : (-> a a)
---  ((fn [y] y 3) x) : Int
---
--- >>> check (M.fromList [("x", TFun (TVar "a") (TVar "a"))]) emptyUEnv (UnaryCall (Function (Var "y") (UnaryCall (Var "y") (Literal (IntV 3)))) (Var "x"))
--- (fromList [("x",(-> a a))],fromList [("a",Int)],Int)
---
--- Below is: ((fn [x] x 3) (fn [x] x))
---                         (-> a a)
---            (fn [x : (-> a a)] x 3) : Int
---
--- >>> check emptyTEnv emptyUEnv (UnaryCall (Function (Var "x") (UnaryCall (Var "x") (Literal (IntV 3)))) (Function (Var "x") (Var "x")))
--- (fromList [],fromList [("a",Int),("x",Int)],Int)
+-- =======convert to test pole========
 --
 -- Below is self application (see Pierce pg 345):
 --   Environment: f : (-> a a)
@@ -424,6 +412,7 @@ checkNullCall _ _ _ = throwE emptyGenericTypeError
 checkUnaryCall :: TEnv -> UEnv -> Exp -> TypeCheck (TEnv, UEnv, Type)
 checkUnaryCall tenv uenv (UnaryCall fn arg) = do
   (_, uenv', fnT) <- checkExp tenv uenv fn
+  -- TODO merge the first two case statements?
   case fnT of
     (TFun fna fnb) -> do
       (_, uenv'', argT) <- checkExp tenv uenv' arg
@@ -455,26 +444,12 @@ checkUnaryCall tenv uenv (UnaryCall fn arg) = do
   --
     (TVar fnVarT) -> do
       (_, uenv'', argT) <- checkExp tenv uenv' arg
-      if isBound argT
-      then do
-        fnbT <- getFresh
-        (uenv''', fnT') <- unify uenv'' (TVar fnVarT) (TFun argT fnbT)
-        -- We partially know the type of the function. Add that to
-        -- the tenv so that parent can use it in their type check.
-        let tenv' = insertEnv tenv fnVarT fnT'
-        return (tenv', uenv''', funReturnType fnT')
-      else do
-        -- We have something like: (x y), where x is free. That is, we have:
-        --
-        -- x : (-> ? ?)
-        -- y : a
-        --
-        -- So, unify: x <=> (-> a ?)
-        --
-        fnbT <- getFresh
-        (_, fnT') <- unify uenv'' (TVar fnVarT) (TFun argT fnbT)
-        let tenv' = insertEnv tenv fnVarT fnT'
-        return (tenv', uenv'', funReturnType fnT')
+      fnbT <- getFresh
+      (uenv''', fnT') <- unify uenv'' (TVar fnVarT) (TFun argT fnbT)
+      -- We partially know the type of the function. Add that to
+      -- the tenv so that parent can use it in their type check.
+      let tenv' = insertEnv tenv fnVarT fnT'
+      return (tenv', uenv''', replaceAllTVars uenv''' (funReturnType fnT'))
     t -> do
       -- Find argument type for better error message.
       (_, _, argT) <- checkExp tenv uenv' arg
