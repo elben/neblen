@@ -65,20 +65,20 @@ emitDef _ _ _ = error "Definition has invalid variable name."
 
 -- | Emit nullary function.
 --
--- >>> emitNullaryFunction emptyEnv (Add (Literal (IntV 3)) (Var "x"))
+-- >>> emitNullaryFun emptyEnv (Add (Literal (IntV 3)) (Var "x"))
 -- "(function () { return (3 + _nbln_x); })"
 --
-emitNullaryFunction :: Env -> Exp -> JSProgram
-emitNullaryFunction env expr = "(function () { return " ++ emitExp env expr ++ "; })"
+emitNullaryFun :: Env -> Exp -> JSProgram
+emitNullaryFun env expr = "(function () { return " ++ emitExp env expr ++ "; })"
 
 -- | Emit unary function.
 --
--- >>> emitFunction emptyEnv (Var "x") (Add (Literal (IntV 3)) (Var "x"))
+-- >>> emitFun emptyEnv (Var "x") (Add (Literal (IntV 3)) (Var "x"))
 -- "(function (_nbln_x) { return (3 + _nbln_x); })"
 --
-emitFunction :: Env -> Exp -> Exp -> JSProgram
-emitFunction env (Var v) expr = "(function (" ++ xformVar v ++ ") { return " ++ emitExp env expr ++ "; })"
-emitFunction _ _ _ = error "Invalid function definition."
+emitFun :: Env -> Exp -> Exp -> JSProgram
+emitFun env (Var v) expr = "(function (" ++ xformVar v ++ ") { return " ++ emitExp env expr ++ "; })"
+emitFun _ _ _ = error "Invalid function definition."
 
 -- | Emit let binding.
 --
@@ -89,37 +89,37 @@ emitFunction _ _ _ = error "Invalid function definition."
 -- >>> emitLet emptyEnv (Var "x") (Literal (IntV 55)) (Add (Literal (IntV 3)) (Var "x"))
 -- "(function (_nbln_x) { return (3 + _nbln_x); })(55)"
 --
--- >>> emitLet emptyEnv (Var "incr") (Function (Var "x") (Add (Literal (IntV 1)) (Var "x"))) (UnaryCall (Var "incr") (Literal (IntV 10)))
+-- >>> emitLet emptyEnv (Var "incr") (Fun (Var "x") (Add (Literal (IntV 1)) (Var "x"))) (UnaryApp (Var "incr") (Literal (IntV 10)))
 -- "(function (_nbln_incr) { return _nbln_incr(10); })((function (_nbln_x) { return (1 + _nbln_x); }))"
 --
 emitLet :: Env -> Exp -> Exp -> Exp -> JSProgram
-emitLet env (Var v) val body = emitUnaryCall env (Function (Var v) body) val
+emitLet env (Var v) val body = emitUnaryApp env (Fun (Var v) body) val
 emitLet _ _ _ _ = "Invalid let definition."
 
 -- | Emit nullary function call.
 --
--- Env -> Function or function name -> JSProgram
+-- Env -> Fun or function name -> JSProgram
 --
-emitNullaryCall :: Env -> Exp -> JSProgram
-emitNullaryCall _ (Var fn) = xformVar fn ++ "()"
-emitNullaryCall env (Function var body) = emitFunction env var body ++ "()"
-emitNullaryCall env expr = emitExp env expr ++ "()"
+emitNullaryApp :: Env -> Exp -> JSProgram
+emitNullaryApp _ (Var fn) = xformVar fn ++ "()"
+emitNullaryApp env (Fun var body) = emitFun env var body ++ "()"
+emitNullaryApp env expr = emitExp env expr ++ "()"
 
 -- | Emit unary function call.
 --
--- Env -> Function or function name -> Argument expression -> JSProgram
+-- Env -> Fun or function name -> Argument expression -> JSProgram
 --
-emitUnaryCall :: Env -> Exp -> Exp -> JSProgram
-emitUnaryCall env (Var fn) arg = xformVar fn ++ "(" ++ emitExp env arg ++ ")"
-emitUnaryCall env (Function var body) arg = emitFunction env var body ++ "(" ++ emitExp env arg ++ ")"
-emitUnaryCall env expr arg = emitExp env expr ++ "(" ++ emitExp env arg ++ ")"
+emitUnaryApp :: Env -> Exp -> Exp -> JSProgram
+emitUnaryApp env (Var fn) arg = xformVar fn ++ "(" ++ emitExp env arg ++ ")"
+emitUnaryApp env (Fun var body) arg = emitFun env var body ++ "(" ++ emitExp env arg ++ ")"
+emitUnaryApp env expr arg = emitExp env expr ++ "(" ++ emitExp env arg ++ ")"
 
 -- | Emit vector.
 --
 -- >>> emitVector emptyEnv []
 -- "[]"
 --
--- >>> emitVector emptyEnv [Literal (IntV 1), Literal (IntV 3), (Let (Var "incr") (Function (Var "x") (Add (Literal (IntV 1)) (Var "x"))) (UnaryCall (Var "incr") (Literal (IntV 10))))]
+-- >>> emitVector emptyEnv [Literal (IntV 1), Literal (IntV 3), (Let (Var "incr") (Fun (Var "x") (Add (Literal (IntV 1)) (Var "x"))) (UnaryApp (Var "incr") (Literal (IntV 10))))]
 -- "[1,3,(function (_nbln_incr) { return _nbln_incr(10); })((function (_nbln_x) { return (1 + _nbln_x); }))]"
 --
 emitVector :: Env -> [Exp] -> JSProgram
@@ -149,17 +149,17 @@ emitExp env (List v) = emitVector env v
 emitExp _ (Var s) = xformVar s
 emitExp env (Def var expr) = emitDef env var expr
 emitExp env (Add left right) = "(" ++ emitExp env left ++ " + " ++ emitExp env right ++ ")"
-emitExp env (NullaryFun expr) = emitNullaryFunction env expr
-emitExp env (Function var expr) = emitFunction env var expr
-emitExp env (UnaryCall fun arg) = emitUnaryCall env fun arg
-emitExp env (NullaryCall fun) = emitNullaryCall env fun
+emitExp env (NullaryFun expr) = emitNullaryFun env expr
+emitExp env (Fun var expr) = emitFun env var expr
+emitExp env (UnaryApp fun arg) = emitUnaryApp env fun arg
+emitExp env (NullaryApp fun) = emitNullaryApp env fun
 emitExp env (Let var val body) = emitLet env var val body
 emitExp env e@(If {}) = emitIf env e
 
 -- | The standard library program.
 --
 standardLib :: JSProgram
-standardLib = M.foldlWithKey (\js fn body -> js ++ "\nvar " ++ fn ++ "=" ++ body) "" standardFunctions ++ "\n\n"
+standardLib = M.foldlWithKey (\js fn body -> js ++ "\nvar " ++ fn ++ "=" ++ body) "" standardFuns ++ "\n\n"
 
 -- | Emit a JavaScript program.
 --

@@ -23,10 +23,10 @@ data Exp = Literal Value
          | Var Name          -- ^ Var "x"
          | Def Exp Exp       -- ^ Def (Var "x") Exp
          | Add Exp Exp
-         | NullaryFun Exp    -- ^ Function Exp
-         | Function Exp Exp  -- ^ Function (Var "x") Exp
-         | UnaryCall Exp Exp -- ^ UnaryCall (Function or Var) (Argument value)
-         | NullaryCall Exp   -- ^ NullaryCall (Function or Var)
+         | NullaryFun Exp    -- ^ Fun Exp
+         | Fun Exp Exp       -- ^ Fun (Var "x") Exp
+         | NullaryApp Exp    -- ^ NullaryApp (Fun or Var)
+         | UnaryApp Exp Exp  -- ^ UnaryApp (Fun or Var) (Argument value)
          | Let Exp Exp Exp   -- ^ Let (Var "x") (Value of x) Body.
          | If Exp Exp Exp    -- ^ If (Predicate : Bool) (Then clause) (Else clause)
         -- ^ TODO: Convert let to macro that uses function.
@@ -51,8 +51,8 @@ symbolToJsId = M.fromList [
 reservedIds :: S.Set String
 reservedIds = S.fromList ["def", "fn", "let"]
 
-standardFunctions :: M.Map String JSProgram
-standardFunctions = M.fromList [
+standardFuns :: M.Map String JSProgram
+standardFuns = M.fromList [
   -- first-or, rest, rest-or
   ("_nbln_firstminusor", "function(list) { return function(or) { if (list.length === 0) { return or; } else { return list[0]; }; }; };"),
   ("_nbln_rest", "function(list) { if (list.length === 0) { return []; } else { return list.slice(1,list.length); }; };"),

@@ -250,7 +250,7 @@ check tenv uenv e = case e of
 
   (NullaryFun body) -> check tenv uenv body
 
-  (Function (Var v) body) -> do
+  (Fun (Var v) body) -> do
     -- Get fresh type variable for argument variable, and bind the arg var to this
     -- type var.
     tv <- getFresh
@@ -262,11 +262,11 @@ check tenv uenv e = case e of
     let argT = fromMaybe tv (lookupEnv tenv'' v)
     return (tenv, uenv', TFun (replaceAllTVars uenv' argT) (replaceAllTVars uenv' bodyT))
 
-  (Function _ _) -> throwE (GenericTypeError (Just "Function binding must be a variable"))
+  (Fun _ _) -> throwE (GenericTypeError (Just "Fun binding must be a variable"))
 
-  (NullaryCall body) -> check tenv uenv body
+  (NullaryApp body) -> check tenv uenv body
 
-  (UnaryCall fn arg) -> do
+  (UnaryApp fn arg) -> do
     (_, uenv', fnT) <- check tenv uenv fn
     (_, uenv'', argT) <- check tenv uenv' arg
     case fnT of
@@ -335,7 +335,7 @@ check tenv uenv e = case e of
 --     Not allowed: ((\x -> x x) id)
 --     Works: ((\x -> x x) id)
 --
--- >>> check (M.fromList [("f",TFun (TVar "a") (TVar "a"))]) emptyUEnv (UnaryCall (Function (Var "x") (UnaryCall (Var "x") (Var "x"))) (Var "f"))
+-- >>> runCheck (M.fromList [("f",TFun (TVar "a") (TVar "a"))]) emptyUEnv (UnaryApp (Fun (Var "x") (UnaryApp (Var "x") (Var "x"))) (Var "f"))
 -- (fromList [("f",(-> a a))],fromList [("x",(-> a a))],(-> (-> a a) (-> a a)))
 --
 

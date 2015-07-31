@@ -20,8 +20,8 @@ tests = testGroup "Neblen.TypeChecker.Tests" $ concat
     , testCheckLet
     , testCheckNullFun
     , testcheckFun
-    , testCheckNullCall
-    , testCheckUnaryCall
+    , testCheckNullApp
+    , testCheckUnaryApp
     , testCheckList
     , testCheckIf
     ]
@@ -156,117 +156,117 @@ testcheckFun :: [Test]
 testcheckFun =
   [
     testCase "checkFun: (fn [x] (fn [y] 0))" $
-    run (check emptyTEnv emptyUEnv (Function (Var "x") (Function (Var "y") (Literal (IntV 0)))))
+    run (check emptyTEnv emptyUEnv (Fun (Var "x") (Fun (Var "y") (Literal (IntV 0)))))
     @?= (M.fromList [],M.fromList [],TFun (TVar "a") (TFun (TVar "b") TInt))
 
   -- TODO: Fix
   , testCase "checkFun: argument should not override outside scope: x : Bool => (fn [y] (fn [x] 0))" $
-    run (check (M.fromList [("x",TBool)]) emptyUEnv (Function (Var "y") (Function (Var "x") (Literal (IntV 0)))))
+    run (check (M.fromList [("x",TBool)]) emptyUEnv (Fun (Var "y") (Fun (Var "x") (Literal (IntV 0)))))
     @?= (M.fromList [("x",TBool)],M.fromList [],TFun (TVar "a") (TFun (TVar "b") TInt))
 
   , testCase "checkFun: (fn [x] (fn [y] x)) : (-> a (-> b a))" $
-    run (check emptyTEnv emptyUEnv (Function (Var "x") (Function (Var "y") (Var "x"))))
+    run (check emptyTEnv emptyUEnv (Fun (Var "x") (Fun (Var "y") (Var "x"))))
     @?= (M.fromList [],M.fromList [],TFun (TVar "a") (TFun (TVar "b") (TVar "a")))
 
   , testCase "checkFun: (fn [x] (x 3)) : (-> (-> Int a) a)" $
-    run (check emptyTEnv emptyUEnv (Function (Var "x") (UnaryCall (Var "x") (Literal (IntV 3)))))
+    run (check emptyTEnv emptyUEnv (Fun (Var "x") (UnaryApp (Var "x") (Literal (IntV 3)))))
     @?= (M.fromList [],M.fromList [("a",TFun TInt (TVar "b"))],TFun (TFun TInt (TVar "b")) (TVar "b"))
 
   , testCase "checkFun: (fn [x] (let [z (fn [y] (x 3))] x))" $
-    run (check emptyTEnv emptyUEnv (Function (Var "x") (Let (Var "z") (Function (Var "y") (UnaryCall (Var "x") (Literal (IntV 3)))) (Var "x"))))
+    run (check emptyTEnv emptyUEnv (Fun (Var "x") (Let (Var "z") (Fun (Var "y") (UnaryApp (Var "x") (Literal (IntV 3)))) (Var "x"))))
     @?= (M.fromList [],M.fromList [("a",TFun TInt (TVar "c"))],TFun (TFun TInt (TVar "c")) (TFun TInt (TVar "c")))
 
   , testCase "checkFun: (fn [a] (fn [x] (a x))) : (-> (-> a b) (-> a b))" $
-    run (check emptyTEnv emptyUEnv (Function (Var "a") (Function (Var "x") (UnaryCall (Var "a") (Var "x")))))
+    run (check emptyTEnv emptyUEnv (Fun (Var "a") (Fun (Var "x") (UnaryApp (Var "a") (Var "x")))))
     @?= (M.fromList [],M.fromList [("a",TFun (TVar "b") (TVar "c"))],TFun (TFun (TVar "b") (TVar "c")) (TFun (TVar "b") (TVar "c")))
 
   -- TODO: Fix, what is this type? Can this be resolved with let-polymorphism?
   -- We would have to unify to the most general type.
   , testCase "checkFun: (fn [x] x x)" $
-    expectE (check emptyTEnv emptyUEnv (Function (Var "x") (UnaryCall (Var "x") (Var "x"))))
+    expectE (check emptyTEnv emptyUEnv (Fun (Var "x") (UnaryApp (Var "x") (Var "x"))))
     @?= InfiniteType (TVar "a") (TFun (TVar "a") (TVar "b"))
 
   , testCase "checkFun: ((fn [x] x 3) (fn [x] x))" $
-    run (check emptyTEnv emptyUEnv (UnaryCall (Function (Var "x") (UnaryCall (Var "x") (Literal (IntV 3)))) (Function (Var "x") (Var "x"))))
+    run (check emptyTEnv emptyUEnv (UnaryApp (Fun (Var "x") (UnaryApp (Var "x") (Literal (IntV 3)))) (Fun (Var "x") (Var "x"))))
     @?= (M.fromList [],M.fromList [("a",TFun TInt (TVar "b")),("b",TInt),("c",TInt)],TInt)
 
   ]
 
-testCheckNullCall :: [Test]
-testCheckNullCall =
+testCheckNullApp :: [Test]
+testCheckNullApp =
   [
-    testCase "testNullCall" $
-    run (check (M.fromList [("x",TBool)]) emptyUEnv (NullaryCall (Var "x")))
+    testCase "testNullApp" $
+    run (check (M.fromList [("x",TBool)]) emptyUEnv (NullaryApp (Var "x")))
     @?= (M.fromList [("x",TBool)],M.fromList [],TBool)
 
-  , testCase "testNullCall" $
-    run (check emptyTEnv emptyUEnv (NullaryCall (NullaryFun (Literal (BoolV True)))))
+  , testCase "testNullApp" $
+    run (check emptyTEnv emptyUEnv (NullaryApp (NullaryFun (Literal (BoolV True)))))
     @?= (M.fromList [],M.fromList [],TBool)
 
-  , testCase "testNullCall" $
-    expectE (check emptyTEnv emptyUEnv (NullaryCall (Var "x")))
+  , testCase "testNullApp" $
+    expectE (check emptyTEnv emptyUEnv (NullaryApp (Var "x")))
     @?= UnboundVariable "x"
   ]
 
-testCheckUnaryCall :: [Test]
-testCheckUnaryCall =
+testCheckUnaryApp :: [Test]
+testCheckUnaryApp =
   [
-    testCase "checkUnaryCall {x : (-> Int Bool)}: (x 0)" $
-    run (check (M.fromList [("x",TFun TInt TBool)]) emptyUEnv (UnaryCall (Var "x") (Literal (IntV 0))))
+    testCase "checkUnaryApp {x : (-> Int Bool)}: (x 0)" $
+    run (check (M.fromList [("x",TFun TInt TBool)]) emptyUEnv (UnaryApp (Var "x") (Literal (IntV 0))))
     @?= (M.fromList [("x",TFun TInt TBool)],M.fromList [],TBool)
 
-  , testCase "checkUnaryCall: {f : (-> Bool Bool)}: (let [x true] (f x))" $
-    run (check (M.fromList [("f",TFun TBool TBool)]) emptyUEnv (Let (Var "x") (Literal (BoolV True)) (UnaryCall (Var "f") (Var "x"))))
+  , testCase "checkUnaryApp: {f : (-> Bool Bool)}: (let [x true] (f x))" $
+    run (check (M.fromList [("f",TFun TBool TBool)]) emptyUEnv (Let (Var "x") (Literal (BoolV True)) (UnaryApp (Var "f") (Var "x"))))
     @?= (M.fromList [("f",TFun TBool TBool)],M.fromList [],TBool)
 
-  , testCase "checkUnaryCall: {f : (-> Int Bool)}: ((fn [x] x) f)" $
-    run (check (M.fromList [("f",TFun TInt TBool)]) emptyUEnv (UnaryCall (Function (Var "x") (Var "x")) (Var "f")))
+  , testCase "checkUnaryApp: {f : (-> Int Bool)}: ((fn [x] x) f)" $
+    run (check (M.fromList [("f",TFun TInt TBool)]) emptyUEnv (UnaryApp (Fun (Var "x") (Var "x")) (Var "f")))
     @?= (M.fromList [("f",TFun TInt TBool)],M.fromList [("a",TFun TInt TBool)],TFun TInt TBool)
 
-  , testCase "checkUnaryCall: {x -> (-> p p)}: ((fn [y] (y 3)) x)" $
-    run (check (M.fromList [("x", TFun (TVar "p") (TVar "p"))]) emptyUEnv (UnaryCall (Function (Var "y") (UnaryCall (Var "y") (Literal (IntV 3)))) (Var "x")))
+  , testCase "checkUnaryApp: {x -> (-> p p)}: ((fn [y] (y 3)) x)" $
+    run (check (M.fromList [("x", TFun (TVar "p") (TVar "p"))]) emptyUEnv (UnaryApp (Fun (Var "y") (UnaryApp (Var "y") (Literal (IntV 3)))) (Var "x")))
     @?= (M.fromList [("x",TFun (TVar "p") (TVar "p"))],M.fromList [("a",TFun TInt (TVar "b")),("b",TInt),("p",TInt)],TInt)
 
-  , testCase "checkUnaryCall: (let [x (fn [y] y)] (x 3))" $
-    run (check emptyTEnv emptyUEnv (Let (Var "x") (Function (Var "y") (Var "y")) (UnaryCall (Var "x") (Literal (IntV 3)))))
+  , testCase "checkUnaryApp: (let [x (fn [y] y)] (x 3))" $
+    run (check emptyTEnv emptyUEnv (Let (Var "x") (Fun (Var "y") (Var "y")) (UnaryApp (Var "x") (Literal (IntV 3)))))
     @?= (M.fromList [],M.fromList [("a",TInt)],TInt)
 
-  , testCase "checkUnaryCall: (let [x (fn [y] y)] (x (x 3)))" $
-    run (check emptyTEnv emptyUEnv (Let (Var "x") (Function (Var "y") (Var "y")) (UnaryCall (Var "x") (UnaryCall (Var "x") (Literal (IntV 3))))))
+  , testCase "checkUnaryApp: (let [x (fn [y] y)] (x (x 3)))" $
+    run (check emptyTEnv emptyUEnv (Let (Var "x") (Fun (Var "y") (Var "y")) (UnaryApp (Var "x") (UnaryApp (Var "x") (Literal (IntV 3))))))
     @?= (M.fromList [],M.fromList [("a",TInt)],TInt)
 
-  , testCase "checkUnaryCall: ((fn [x] (fn [y] x)) 0)" $
-    run (check emptyTEnv emptyUEnv (UnaryCall (Function (Var "x") (Function (Var "y") (Var "x"))) (Literal (IntV 0))))
+  , testCase "checkUnaryApp: ((fn [x] (fn [y] x)) 0)" $
+    run (check emptyTEnv emptyUEnv (UnaryApp (Fun (Var "x") (Fun (Var "y") (Var "x"))) (Literal (IntV 0))))
     @?= (M.fromList [],M.fromList [("a",TInt)],TFun (TVar "b") TInt)
 
-  , testCase "checkUnaryCall: (((fn [x] (fn [y] x)) 0) True)" $
-    run (check emptyTEnv emptyUEnv (UnaryCall (UnaryCall (Function (Var "x") (Function (Var "y") (Var "x"))) (Literal (IntV 0))) (Literal (BoolV True))))
+  , testCase "checkUnaryApp: (((fn [x] (fn [y] x)) 0) True)" $
+    run (check emptyTEnv emptyUEnv (UnaryApp (UnaryApp (Fun (Var "x") (Fun (Var "y") (Var "x"))) (Literal (IntV 0))) (Literal (BoolV True))))
     @?= (M.fromList [],M.fromList [("a",TInt),("b",TBool)],TInt)
 
-  , testCase "checkUnaryCall: ((fn [x] x 3) (fn [x] x)) : Int" $
-    run (check emptyTEnv emptyUEnv (UnaryCall (Function (Var "x") (UnaryCall (Var "x") (Literal (IntV 3)))) (Function (Var "x") (Var "x"))))
+  , testCase "checkUnaryApp: ((fn [x] x 3) (fn [x] x)) : Int" $
+    run (check emptyTEnv emptyUEnv (UnaryApp (Fun (Var "x") (UnaryApp (Var "x") (Literal (IntV 3)))) (Fun (Var "x") (Var "x"))))
     @?= (M.fromList [],M.fromList [("a",TFun TInt (TVar "b")),("b",TInt),("c",TInt)],TInt)
 
-  , testCase "checkUnaryCall: (x 0) unbound variable" $
-    expectE (check emptyTEnv emptyUEnv (UnaryCall (Var "x") (Literal (IntV 0))))
+  , testCase "checkUnaryApp: (x 0) unbound variable" $
+    expectE (check emptyTEnv emptyUEnv (UnaryApp (Var "x") (Literal (IntV 0))))
     @?= UnboundVariable "x"
 
-  , testCase "checkUnaryCall: x : Int => (x 0) type mismatch" $
-    expectE (check (M.fromList [("x",TInt)]) emptyUEnv (UnaryCall (Var "x") (Literal (IntV 0))))
+  , testCase "checkUnaryApp: x : Int => (x 0) type mismatch" $
+    expectE (check (M.fromList [("x",TInt)]) emptyUEnv (UnaryApp (Var "x") (Literal (IntV 0))))
     @?= Mismatch (TFun TInt (TVar "a")) TInt
 
   -- TODO can this be type-checked with let-polymorphism?
-  , testCase "checkUnaryCall: (let [x (fn [y] y)] (x x))" $
-    expectE (check emptyTEnv emptyUEnv (Let (Var "x") (Function (Var "y") (Var "y")) (UnaryCall (Var "x") (Var "x"))))
+  , testCase "checkUnaryApp: (let [x (fn [y] y)] (x x))" $
+    expectE (check emptyTEnv emptyUEnv (Let (Var "x") (Fun (Var "y") (Var "y")) (UnaryApp (Var "x") (Var "x"))))
     @?= InfiniteType (TVar "a") (TFun (TVar "a") (TVar "a"))
 
-  , testCase "checkUnaryCall: x : (-> Bool Int) => (x 0)" $
-    expectE (check (M.fromList [("x",TFun TBool TInt)]) emptyUEnv (UnaryCall (Var "x") (Literal (IntV 0))))
+  , testCase "checkUnaryApp: x : (-> Bool Int) => (x 0)" $
+    expectE (check (M.fromList [("x",TFun TBool TInt)]) emptyUEnv (UnaryApp (Var "x") (Literal (IntV 0))))
     @?= Mismatch TBool TInt
 
   -- TODO: Fix
-  , testCase "checkUnaryCall: x : (-> z z) => ((fn [y] (y 3)) x) : Int" $
-    run (check (M.fromList [("x", TFun (TVar "z") (TVar "z"))]) emptyUEnv (UnaryCall (Function (Var "y") (UnaryCall (Var "y") (Literal (IntV 3)))) (Var "x")))
+  , testCase "checkUnaryApp: x : (-> z z) => ((fn [y] (y 3)) x) : Int" $
+    run (check (M.fromList [("x", TFun (TVar "z") (TVar "z"))]) emptyUEnv (UnaryApp (Fun (Var "y") (UnaryApp (Var "y") (Literal (IntV 3)))) (Var "x")))
     @?= (M.fromList [("x",TFun (TVar "z") (TVar "z"))],M.fromList [("a",TFun TInt (TVar "b")),("b",TInt),("z",TInt)],TInt)
   ]
 
@@ -282,7 +282,7 @@ testCheckList =
     @?= (M.fromList [],M.fromList [],TList TInt)
 
   , testCase "checkList: [0 ((fn [x] x) 0) 123]" $
-    run (check emptyTEnv emptyUEnv (List [Literal (IntV 0),UnaryCall (Function (Var "x") (Var "x")) (Literal (IntV 0)), Literal (IntV 0)]))
+    run (check emptyTEnv emptyUEnv (List [Literal (IntV 0),UnaryApp (Fun (Var "x") (Var "x")) (Literal (IntV 0)), Literal (IntV 0)]))
     @?= (M.fromList [],M.fromList [("a",TInt),("b",TInt)],TList TInt)
 
   , testCase "checkList: [0 true]" $
@@ -294,11 +294,11 @@ testCheckIf :: [Test]
 testCheckIf =
   [
     testCase "checkIf: (if ((fn [x] true) 0) \"truth\" \"false\") : String" $
-    run (check emptyTEnv emptyUEnv (If (UnaryCall (Function (Var "x") (Literal (BoolV True))) (Literal (IntV 0))) (Literal (StringV "then clause")) (Literal (StringV "else clause"))))
+    run (check emptyTEnv emptyUEnv (If (UnaryApp (Fun (Var "x") (Literal (BoolV True))) (Literal (IntV 0))) (Literal (StringV "then clause")) (Literal (StringV "else clause"))))
     @?= (M.fromList [],M.fromList [("a",TInt)],TString)
 
   , testCase "checkIf: (if true (fn [x] x) (fn [y] y))" $
-    run (check emptyTEnv emptyUEnv (If (Literal (BoolV False)) (Function (Var "x") (Var "x")) (Function (Var "y") (Var "y"))))
+    run (check emptyTEnv emptyUEnv (If (Literal (BoolV False)) (Fun (Var "x") (Var "x")) (Fun (Var "y") (Var "y"))))
     @?= (M.fromList [],M.fromList [("b",TVar "a")],TFun (TVar "a") (TVar "a"))
 
   , testCase "checkIf: (if false 0 false)" $

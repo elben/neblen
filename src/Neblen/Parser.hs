@@ -273,78 +273,78 @@ parseDef = try $ do
 
 -- | Parse unary function calls.
 --
--- >>> parse parseUnaryCall "" "(x 123)"
--- Right (UnaryCall (Var "x") (Literal (IntV 123)))
+-- >>> parse parseUnaryApp "" "(x 123)"
+-- Right (UnaryApp (Var "x") (Literal (IntV 123)))
 --
 -- Curry (x 1 2) as ((x 1) 2):
 --
--- >>> parse parseUnaryCall "" "(x 1 2)"
--- Right (UnaryCall (UnaryCall (Var "x") (Literal (IntV 1))) (Literal (IntV 2)))
+-- >>> parse parseUnaryApp "" "(x 1 2)"
+-- Right (UnaryApp (UnaryApp (Var "x") (Literal (IntV 1))) (Literal (IntV 2)))
 --
--- >>> parse parseUnaryCall "" "(x 1 2 3)"
--- Right (UnaryCall (UnaryCall (UnaryCall (Var "x") (Literal (IntV 1))) (Literal (IntV 2))) (Literal (IntV 3)))
+-- >>> parse parseUnaryApp "" "(x 1 2 3)"
+-- Right (UnaryApp (UnaryApp (UnaryApp (Var "x") (Literal (IntV 1))) (Literal (IntV 2))) (Literal (IntV 3)))
 --
--- >>> parse parseUnaryCall "" "((fn [x y z] (+ x y)) 1 2 3)"
--- Right (UnaryCall (UnaryCall (UnaryCall (Function (Var "x") (Function (Var "y") (Function (Var "z") (UnaryCall (UnaryCall (Var "+") (Var "x")) (Var "y"))))) (Literal (IntV 1))) (Literal (IntV 2))) (Literal (IntV 3)))
+-- >>> parse parseUnaryApp "" "((fn [x y z] (+ x y)) 1 2 3)"
+-- Right (UnaryApp (UnaryApp (UnaryApp (Fun (Var "x") (Fun (Var "y") (Fun (Var "z") (UnaryApp (UnaryApp (Var "+") (Var "x")) (Var "y"))))) (Literal (IntV 1))) (Literal (IntV 2))) (Literal (IntV 3)))
 --
-parseUnaryCall :: Parser Exp
-parseUnaryCall = try $ do
+parseUnaryApp :: Parser Exp
+parseUnaryApp = try $ do
   _ <- char '('
   varOrFn <- parseVar <|> parseFun
   skipSpaces1
   args <- parseExps
   _ <- char ')'
-  return $ buildCallStack varOrFn args
+  return $ buildAppStack varOrFn args
 
 -- | Convert a function call with multiple arguments to recursive unary calls.
 -- If no arguments are given, return a nullary function call.
 --
--- >>> buildCallStack (Var "x") []
--- NullaryCall (Var "x")
+-- >>> buildAppStack (Var "x") []
+-- NullaryApp (Var "x")
 --
--- >>> buildCallStack (Var "x") [Literal (IntV 1)]
--- UnaryCall (Var "x") (Literal (IntV 1))
+-- >>> buildAppStack (Var "x") [Literal (IntV 1)]
+-- UnaryApp (Var "x") (Literal (IntV 1))
 --
--- >>> buildCallStack (Var "x") [Literal (IntV 1),Literal (IntV 2),Literal (IntV 3)]
--- UnaryCall (UnaryCall (UnaryCall (Var "x") (Literal (IntV 1))) (Literal (IntV 2))) (Literal (IntV 3))
+-- >>> buildAppStack (Var "x") [Literal (IntV 1),Literal (IntV 2),Literal (IntV 3)]
+-- UnaryApp (UnaryApp (UnaryApp (Var "x") (Literal (IntV 1))) (Literal (IntV 2))) (Literal (IntV 3))
 --
-buildCallStack :: Exp -> [Exp] -> Exp
-buildCallStack fn [] = NullaryCall fn
-buildCallStack fn [arg] = UnaryCall fn arg
-buildCallStack fn (a:as) = buildCallStack (UnaryCall fn a) as
+buildAppStack :: Exp -> [Exp] -> Exp
+buildAppStack fn [] = NullaryApp fn
+buildAppStack fn [arg] = UnaryApp fn arg
+buildAppStack fn (a:as) = buildAppStack (UnaryApp fn a) as
 
 -- | Parse nullary function calls. That is, functions with no arguments.
 --
--- >>> parse parseNullaryCall "" "(+)"
--- Right (NullaryCall (Var "+"))
+-- >>> parse parseNullaryApp "" "(+)"
+-- Right (NullaryApp (Var "+"))
 --
--- >>> parse parseNullaryCall "" "(list)"
--- Right (NullaryCall (Var "list"))
+-- >>> parse parseNullaryApp "" "(list)"
+-- Right (NullaryApp (Var "list"))
 --
--- >>> isLeft $ parse parseNullaryCall "" "()"
+-- >>> isLeft $ parse parseNullaryApp "" "()"
 -- True
 --
-parseNullaryCall :: Parser Exp
-parseNullaryCall = do
+parseNullaryApp :: Parser Exp
+parseNullaryApp = do
   _ <- char '('
   varOrFn <- parseVar
   _ <- char ')'
-  return $ NullaryCall varOrFn
+  return $ NullaryApp varOrFn
 
 -- | Parse functions.
 --
 -- >>> parse parseFun "" "(fn [x] (+ x 123))"
--- Right (Function (Var "x") (UnaryCall (UnaryCall (Var "+") (Var "x")) (Literal (IntV 123))))
+-- Right (Fun (Var "x") (UnaryApp (UnaryApp (Var "+") (Var "x")) (Literal (IntV 123))))
 --
 -- >>> parse parseFun "" "(fn [x y z] (x y z))"
--- Right (Function (Var "x") (Function (Var "y") (Function (Var "z") (UnaryCall (UnaryCall (Var "x") (Var "y")) (Var "z")))))
+-- Right (Fun (Var "x") (Fun (Var "y") (Fun (Var "z") (UnaryApp (UnaryApp (Var "x") (Var "y")) (Var "z")))))
 --
 parseFun :: Parser Exp
 parseFun = do
   parseStartsListWith "fn"
   argsVec <- parseVecOfVars
-  body <- parseBodyOfFunction
-  return $ buildFunctionCurry body argsVec
+  body <- parseBodyOfFun
+  return $ buildFunCurry body argsVec
 
 parseStartsListWith :: String -> Parser ()
 parseStartsListWith keyword = do
@@ -352,18 +352,18 @@ parseStartsListWith keyword = do
   _ <- try $ string keyword
   skipSpaces1
 
-parseBodyOfFunction :: Parser Exp
-parseBodyOfFunction = do
+parseBodyOfFun :: Parser Exp
+parseBodyOfFun = do
   _ <- skipSpaces1
   body <- parseExp
   _ <- char ')'
   return body
 
-buildFunctionCurry :: Exp -> [Exp] -> Exp
-buildFunctionCurry body [] = NullaryFun body
-buildFunctionCurry body [Var v] = Function (Var v) body
-buildFunctionCurry body (Var v:as) = Function (Var v) (buildFunctionCurry body as)
-buildFunctionCurry _ _ = error "Invalid function argument list."
+buildFunCurry :: Exp -> [Exp] -> Exp
+buildFunCurry body [] = NullaryFun body
+buildFunCurry body [Var v] = Fun (Var v) body
+buildFunCurry body (Var v:as) = Fun (Var v) (buildFunCurry body as)
+buildFunCurry _ _ = error "Invalid function argument list."
 
 -- | Parse vector of vars.
 --
@@ -383,7 +383,7 @@ parseVecOfVars = do
 -- | Parse let expressions.
 --
 -- >>> parse parseLet "" "(let [x 1 y 2] (+ x y))"
--- Right (Let (Var "x") (Literal (IntV 1)) (Let (Var "y") (Literal (IntV 2)) (UnaryCall (UnaryCall (Var "+") (Var "x")) (Var "y"))))
+-- Right (Let (Var "x") (Literal (IntV 1)) (Let (Var "y") (Literal (IntV 2)) (UnaryApp (UnaryApp (Var "+") (Var "x")) (Var "y"))))
 --
 -- >>> isLeft $ parse parseLet "" "(let [] (+ x y))"
 -- True
@@ -395,7 +395,7 @@ parseLet :: Parser Exp
 parseLet = do
   parseStartsListWith "let"
   bindings <- parseVarExpPairs
-  body <- parseBodyOfFunction
+  body <- parseBodyOfFun
   return $ buildLetBindingStack body bindings
 
 buildLetBindingStack :: Exp -> [(Exp, Exp)] -> Exp
@@ -456,13 +456,13 @@ parseVarExpPair = do
 -- Right (Def (Var "x") (Literal (IntV 123)))
 --
 -- >>> parse parseExp "" "(foo bar)"
--- Right (UnaryCall (Var "foo") (Var "bar"))
+-- Right (UnaryApp (Var "foo") (Var "bar"))
 --
 -- >>> parse parseExp "" "(foo)"
--- Right (NullaryCall (Var "foo"))
+-- Right (NullaryApp (Var "foo"))
 --
 -- >>> parse parseExp "" "(let [x 1 y 2] (+ x y))"
--- Right (Let (Var "x") (Literal (IntV 1)) (Let (Var "y") (Literal (IntV 2)) (UnaryCall (UnaryCall (Var "+") (Var "x")) (Var "y"))))
+-- Right (Let (Var "x") (Literal (IntV 1)) (Let (Var "y") (Literal (IntV 2)) (UnaryApp (UnaryApp (Var "+") (Var "x")) (Var "y"))))
 --
 parseExp :: Parser Exp
 parseExp =
@@ -472,8 +472,8 @@ parseExp =
   try parseList <|>
   try parseVector <|>
   try parseDef <|>
-  try parseUnaryCall <|>
-  try parseNullaryCall <|>
+  try parseUnaryApp <|>
+  try parseNullaryApp <|>
   try parseFun <|>
   try parseLet <|>
   try parseVar
@@ -499,10 +499,10 @@ parseLine = do
 -- | Parse a Neblen program.
 --
 -- >>> parseProgram "(+ 1 2)"
--- Right (UnaryCall (UnaryCall (Var "+") (Literal (IntV 1))) (Literal (IntV 2)))
+-- Right (UnaryApp (UnaryApp (Var "+") (Literal (IntV 1))) (Literal (IntV 2)))
 --
 -- >>> parseProgram "(fn [x] x)"
--- Right (Function (Var "x") (Var "x"))
+-- Right (Fun (Var "x") (Var "x"))
 --
 -- >>> isLeft $ parseProgram "+ 13"
 -- True
