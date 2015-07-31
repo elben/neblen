@@ -102,8 +102,8 @@ unify uenv TString TString = return (uenv, TString)
 unify uenv (TVar tv) t2 = unifyTVar uenv (TVar tv) t2
 unify uenv t1 (TVar tv) = unifyTVar uenv (TVar tv) t1
 unify uenv (TFun a1 r1) (TFun a2 r2) = do
-  (uenv', ta) <- unify uenv a1 a2
-  (uenv'', tr) <- unify uenv' r1 r2
+  (uenv', ta) <- unify uenv (a1) (a2)
+  (uenv'', tr) <- unify uenv' (replaceAllTVars uenv' r1) (replaceAllTVars uenv' r2)
   -- We now have a u-env built from both argument and return types. Substitue
   -- any remaining type variables.
   return (uenv'', TFun (replaceAllTVars uenv'' ta) (replaceAllTVars uenv'' tr))
@@ -128,10 +128,11 @@ unifyTVar uenv (TVar tv) t2 =
                               | otherwise ->
                                   -- Unify free variables together.
                                   --
-                                  -- Example: a <==> b.
-                                  -- UEnv: {a -> b, b -> a}
+                                  -- Example: a <==> b
+                                  -- UEnv: {b -> a}
                                   -- Returned: a
-                                  return (insertEnv (insertEnv uenv tv (TVar tv2)) tv2 (TVar tv), TVar tv)
+                                  return (insertEnv uenv tv2 (TVar tv), TVar tv)
+                                  -- return (insertEnv (insertEnv uenv tv (TVar tv2)) tv2 (TVar tv), TVar tv)
 
                       -- Resolved RHS. In the example above, b (RHS) is resolved to
                       -- Int. So we need to update uenv to {b -> Int, a -> Int}
@@ -459,19 +460,6 @@ checkUnaryCall _ _ _ = throwE emptyGenericTypeError
 
 -- | Check list.
 --
--- >>> check emptyTEnv emptyUEnv (List [Literal (IntV 0)])
--- (fromList [],fromList [],List Int)
---
--- Below is: (list 0 ((fn [x] x) 0))
--- >>> check emptyTEnv emptyUEnv (List [Literal (IntV 0),UnaryCall (Function (Var "x") (Var "x")) (Literal (IntV 0))])
--- (fromList [],fromList [("x",Int)],List Int)
---
--- >>> check emptyTEnv emptyUEnv (List [Literal (IntV 0),Literal (BoolV True)])
--- *** Exception: list type mismatch: Int and Bool found
---
--- >>> check emptyTEnv emptyUEnv (List [])
--- (fromList [],fromList [],List a)
---
 checkList :: TEnv -> UEnv -> Exp -> TypeCheck (TEnv, UEnv, Type)
 checkList tenv uenv (List []) = do
   tv <- getFresh
@@ -482,26 +470,16 @@ checkList tenv uenv (List [e]) = do
 checkList tenv uenv (List (e1:e2:es)) = do
   (_, uenv', e1T) <- checkExp tenv uenv e1
   (_, uenv'', e2T) <- checkExp tenv uenv' e2
-  if e1T == e2T
-     then checkList tenv uenv'' (List (e2:es))
-     else error $ "list type mismatch: " ++ show e1T ++ " and " ++ show e2T ++ " found"
+  (uenv''', _) <- unify uenv'' e1T e2T
+  checkList tenv uenv''' (List (e2:es))
 checkList _ _ _ = error "wrong type"
 
 -- | Check vector.
 --
--- TODO use vectors but still share code with checkList.
 checkVector :: TEnv -> UEnv -> Exp -> TypeCheck (TEnv, UEnv, Type)
 checkVector = checkList
 
 -- | Check if.
---
--- Below is: (if ((fn [x] true) 0) "truth" "false") : String
--- >>> check emptyTEnv emptyUEnv (If (UnaryCall (Function (Var "x") (Literal (BoolV True))) (Literal (IntV 0))) (Literal (StringV "then clause")) (Literal (StringV "else clause")))
--- (fromList [],fromList [("x",Int)],String)
---
--- Below is: (if false 0 false)
--- >>> check emptyTEnv emptyUEnv (If (Literal (BoolV False)) (Literal (IntV 0)) (Literal (BoolV False)))
--- *** Exception: then and else clause type mismatch: Int and Bool found
 --
 checkIf :: TEnv -> UEnv -> Exp -> TypeCheck (TEnv, UEnv, Type)
 checkIf tenv uenv (If p t e) = do
@@ -510,11 +488,9 @@ checkIf tenv uenv (If p t e) = do
     TBool -> do
       (_, uenv'', tT) <- checkExp tenv uenv' t
       (_, uenv''', eT) <- checkExp tenv uenv'' e
-      if tT == eT
-      then return (tenv, uenv''', eT)
-      else error $ "then and else clause type mismatch: " ++ show tT ++ " and " ++ show eT ++ " found"
-    _     ->
-      error "predicate must be a boolean"
+      (uenv'''', retT) <- unify uenv''' tT eT
+      return (tenv, uenv'''', retT)
+    otherT -> throwE $ Mismatch TBool otherT
 checkIf _ _ _ = error "wrong type"
 
 -- | Type check expression.

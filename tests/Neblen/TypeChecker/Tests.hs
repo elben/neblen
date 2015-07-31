@@ -2,7 +2,7 @@ module Neblen.TypeChecker.Tests where
 
 import Test.Framework (Test, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
-import Test.HUnit ((@=?), (@?=))
+import Test.HUnit ((@?=))
 import Control.Monad.Trans.State
 import Control.Monad.Trans.Except
 
@@ -15,7 +15,6 @@ tests :: Test
 tests = testGroup "Neblen.TypeChecker.Tests" $ concat
     [
       testUnifier
-
     , testCheckLiteral
     , testCheckVar
     , testCheckLet
@@ -23,6 +22,8 @@ tests = testGroup "Neblen.TypeChecker.Tests" $ concat
     , testcheckFun
     , testCheckNullCall
     , testCheckUnaryCall
+    , testCheckList
+    , testCheckIf
     ]
 
 testUnifier :: [Test]
@@ -42,39 +43,43 @@ testUnifier =
 
   , testCase "unify: (-> Int Int) <=> (-> a b)" $
     run (unify emptyUEnv (TFun TInt TInt) (TFun (TVar "a") (TVar "b")))
-    @=? (M.fromList [("a",TInt),("b",TInt)],TFun TInt TInt)
+    @?= (M.fromList [("a",TInt),("b",TInt)],TFun TInt TInt)
 
   , testCase "unify: (-> Int a) <=> (-> a b)" $
     run (unify emptyUEnv (TFun TInt (TVar "a")) (TFun (TVar "a") (TVar "b")))
-    @=? (M.fromList [("a",TInt),("b",TInt)],TFun TInt TInt)
+    @?= (M.fromList [("a",TInt),("b",TInt)],TFun TInt TInt)
 
   , testCase "unify: (-> Int a) <=> (-> b b)" $
     run (unify emptyUEnv (TFun TInt (TVar "a")) (TFun (TVar "b") (TVar "b")))
-    @=? (M.fromList [("a",TInt),("b",TInt)],TFun TInt TInt)
+    @?= (M.fromList [("a",TInt),("b",TInt)],TFun TInt TInt)
+
+  , testCase "unify: {b : Bool}: (-> a a) <=> (-> b b)" $
+    run (unify (M.fromList [("b",TBool)]) (TFun (TVar "a") (TVar "a")) (TFun (TVar "a") (TVar "b")))
+    @?= (M.fromList [("a",TBool),("b",TBool)],TFun TBool TBool)
+
+  , testCase "unify: {a -> Int}: (-> a b) <=> (-> a b)" $
+    run (unify (M.fromList [("a",TInt)]) (TFun (TVar "a") (TVar "b")) (TFun (TVar "a") (TVar "b")))
+    @?= (M.fromList [("a",TInt)],TFun TInt (TVar "b"))
 
   , testCase "unify: (-> a a) <=> (-> b b)" $
-    run (unify (M.fromList [("b",TBool)]) (TFun (TVar "a") (TVar "a")) (TFun (TVar "a") (TVar "b")))
-    @=? (M.fromList [("a",TBool),("b",TBool)],TFun TBool TBool)
-
-  , testCase "unify: (-> a b) <=> (-> a b)" $
-    run (unify (M.fromList [("a",TInt)]) (TFun (TVar "a") (TVar "b")) (TFun (TVar "a") (TVar "b")))
-    @=? (M.fromList [("a",TInt)],TFun TInt (TVar "b"))
+    run (unify (M.fromList []) (TFun (TVar "a") (TVar "a")) (TFun (TVar "b") (TVar "b")))
+    @?= (M.fromList [("b",TVar "a")],TFun (TVar "a") (TVar "a"))
 
   , testCase "unify: {b : Bool}: (-> a b) <=> (-> c d) ===> (-> c Bool)" $
     run (unify (M.fromList [("b",TBool)]) (TFun (TVar "a") (TVar "b")) (TFun (TVar "c") (TVar "d")))
-    @=? (M.fromList [("a",TVar "c"),("b",TBool),("c",TVar "a"),("d",TBool)],TFun (TVar "c") TBool)
+    @?= (M.fromList [("b",TBool),("c",TVar "a"),("d",TBool)],TFun (TVar "a") TBool)
 
   , testCase "unify: (-> a a) <=> (-> a a)" $
     run (unify emptyUEnv (TFun (TVar "a") (TVar "a")) (TFun (TVar "a") (TVar "a")))
-    @=? (M.fromList [],TFun (TVar "a") (TVar "a"))
+    @?= (M.fromList [],TFun (TVar "a") (TVar "a"))
 
   , testCase "unify: a <=> Int" $
     expectE (unify (M.fromList [("a",TBool)]) (TVar "a") TInt)
-    @=? Mismatch TBool TInt
+    @?= Mismatch TBool TInt
 
   , testCase "unify: a <=> (-> a Int)" $
     expectE (unify emptyUEnv (TVar "a") (TFun (TVar "a") TInt))
-    @=? InfiniteType (TVar "a") (TFun (TVar "a") TInt)
+    @?= InfiniteType (TVar "a") (TFun (TVar "a") TInt)
   ]
 
 run :: ExceptT TypeError (State FreshCounter) a -> a
@@ -263,3 +268,38 @@ testCheckUnaryCall =
     @?= (M.fromList [("x",TFun (TVar "z") (TVar "z"))],M.fromList [("a",TFun TInt (TVar "b")),("b",TInt),("z",TInt)],TInt)
   ]
 
+testCheckList :: [Test]
+testCheckList =
+  [
+    testCase "checkList: []" $
+    run (checkExp emptyTEnv emptyUEnv (List []))
+    @?= (M.fromList [],M.fromList [],TList (TVar "a"))
+
+  , testCase "checkList: [0]" $
+    run (checkExp emptyTEnv emptyUEnv (List [Literal (IntV 0)]))
+    @?= (M.fromList [],M.fromList [],TList TInt)
+
+  , testCase "checkList: [0 ((fn [x] x) 0) 123]" $
+    run (checkExp emptyTEnv emptyUEnv (List [Literal (IntV 0),UnaryCall (Function (Var "x") (Var "x")) (Literal (IntV 0)), (Literal (IntV 0))]))
+    @?= (M.fromList [],M.fromList [("a",TInt),("b",TInt)],TList TInt)
+
+  , testCase "checkList: [0 true]" $
+    expectE (checkExp emptyTEnv emptyUEnv (List [Literal (IntV 0),Literal (BoolV True)]))
+    @?= Mismatch TInt TBool
+  ]
+
+testCheckIf :: [Test]
+testCheckIf =
+  [
+    testCase "checkIf: (if ((fn [x] true) 0) \"truth\" \"false\") : String" $
+    run (checkExp emptyTEnv emptyUEnv (If (UnaryCall (Function (Var "x") (Literal (BoolV True))) (Literal (IntV 0))) (Literal (StringV "then clause")) (Literal (StringV "else clause"))))
+    @?= (M.fromList [],M.fromList [("a",TInt)],TString)
+
+  , testCase "checkIf: (if true (fn [x] x) (fn [y] y))" $
+    run (checkExp emptyTEnv emptyUEnv (If (Literal (BoolV False)) (Function (Var "x") (Var "x")) (Function (Var "y") (Var "y"))))
+    @?= (M.fromList [],M.fromList [("b",TVar "a")],TFun (TVar "a") (TVar "a"))
+
+  , testCase "checkIf: (if false 0 false)" $
+    expectE (checkExp emptyTEnv emptyUEnv (If (Literal (BoolV False)) (Literal (IntV 0)) (Literal (BoolV False))))
+    @?= Mismatch TInt TBool
+  ]
