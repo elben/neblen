@@ -206,7 +206,7 @@ insertEnv tenv name t = M.insert name t tenv
 
 check :: TEnv -> UEnv -> Exp -> TypeCheck (TEnv, UEnv, Type)
 check tenv uenv e = case e of
-  (Literal lit) ->
+  (Lit lit) ->
     case lit of
       IntV _ -> return (tenv, uenv, TInt)
       BoolV _ -> return (tenv, uenv, TBool)

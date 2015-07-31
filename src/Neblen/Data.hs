@@ -18,7 +18,7 @@ data Value = IntV Int
            | StringV String
   deriving (Show, Eq)
 
-data Exp = Literal Value
+data Exp = Lit Value
          | List [Exp]
          | Var Name          -- ^ Var "x"
          | Def Exp Exp       -- ^ Def (Var "x") Exp

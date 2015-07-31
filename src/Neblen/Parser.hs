@@ -18,10 +18,10 @@ skipSpaces1 = skipMany1 space
 -- | Parse string.
 --
 -- >>> parse parseString "" "\"Hello\""
--- Right (Literal (StringV "Hello"))
+-- Right (Lit (StringV "Hello"))
 --
 -- >>> parse parseString "" "\"\""
--- Right (Literal (StringV ""))
+-- Right (Lit (StringV ""))
 --
 -- >>> isLeft $ parse parseString "" "Hello"
 -- True
@@ -32,15 +32,15 @@ skipSpaces1 = skipMany1 space
 parseString :: Parser Exp
 parseString = do
   s <- between (char '"') (char '"') (many (noneOf "\""))
-  return $ Literal (StringV s)
+  return $ Lit (StringV s)
 
 -- | Parse Boolean.
 --
 -- >>> parse parseBool "" "true"
--- Right (Literal (BoolV True))
+-- Right (Lit (BoolV True))
 --
 -- >>> parse parseBool "" "false"
--- Right (Literal (BoolV False))
+-- Right (Lit (BoolV False))
 --
 -- >>> isLeft $ parse parseBool "" "\"true\""
 -- True
@@ -51,18 +51,18 @@ parseBool = do
   -- literal is not true or false. This way, variables that are prefixed with
   -- any prefix of "true" or "false" can be parsed (e.g. 'fx' or 'true-thing').
   s <- try (string "true") <|> try (string "false")
-  return $ Literal (BoolV (s == "true"))
+  return $ Lit (BoolV (s == "true"))
 
 -- | Parse Integers.
 --
 -- >>> parse parseInt "" "0"
--- Right (Literal (IntV 0))
+-- Right (Lit (IntV 0))
 --
 -- >>> parse parseInt "" "123"
--- Right (Literal (IntV 123))
+-- Right (Lit (IntV 123))
 --
 -- >>> parse parseInt "" "123.456"
--- Right (Literal (IntV 123))
+-- Right (Lit (IntV 123))
 --
 -- >>> isLeft $ parse parseInt "" ".456"
 -- True
@@ -70,7 +70,7 @@ parseBool = do
 parseInt :: Parser Exp
 parseInt = do
   s <- many1 digit
-  return $ Literal (IntV (read s :: Int))
+  return $ Lit (IntV (read s :: Int))
 
 -- | Parse variable identifier. Identifiers must be prefixed with either a
 -- letter, dash (-) or underscore (_). Or a reserved symbol identifier.
@@ -180,13 +180,13 @@ symbolIds = oneOf validIdSymbols
 -- Right (List [])
 --
 -- >>> parse parseList "" "(list xyz-abc \"abc\" 123)"
--- Right (List [Var "xyz-abc",Literal (StringV "abc"),Literal (IntV 123)])
+-- Right (List [Var "xyz-abc",Lit (StringV "abc"),Lit (IntV 123)])
 --
 -- >>> parse parseList "" "(list xyz-abc (list 0 \"foo\" true))"
--- Right (List [Var "xyz-abc",List [Literal (IntV 0),Literal (StringV "foo"),Literal (BoolV True)]])
+-- Right (List [Var "xyz-abc",List [Lit (IntV 0),Lit (StringV "foo"),Lit (BoolV True)]])
 --
 -- >>> parse parseList "" "(list (list 0 \"foo\" true))"
--- Right (List [List [Literal (IntV 0),Literal (StringV "foo"),Literal (BoolV True)]])
+-- Right (List [List [Lit (IntV 0),Lit (StringV "foo"),Lit (BoolV True)]])
 --
 -- >>> isLeft $ parse parseList "" "(def x 123)"
 -- True
@@ -220,7 +220,7 @@ parseEmptyList = try (string "()") A.*> A.pure (List [])
 -- Right (List [])
 --
 -- >>> parse parseList' "" "(list   1 abc-xyz \"abc\")"
--- Right (List [Literal (IntV 1),Var "abc-xyz",Literal (StringV "abc")])
+-- Right (List [Lit (IntV 1),Var "abc-xyz",Lit (StringV "abc")])
 --
 parseList' :: Parser Exp
 parseList' = try (string "(list)") A.*> A.pure (List []) <|> try (parseListWithSurroundingPrefix (Just (string "list")) '(' ')' List)
@@ -231,7 +231,7 @@ parseList' = try (string "(list)") A.*> A.pure (List []) <|> try (parseListWithS
 -- Right (List [])
 --
 -- >>> parse parseVector "" "[xyz-abc [0 \"foo\" true]]"
--- Right (List [Var "xyz-abc",List [Literal (IntV 0),Literal (StringV "foo"),Literal (BoolV True)]])
+-- Right (List [Var "xyz-abc",List [Lit (IntV 0),Lit (StringV "foo"),Lit (BoolV True)]])
 --
 parseVector :: Parser Exp
 parseVector = parseListWithSurrounding '[' ']' List
@@ -258,7 +258,7 @@ parseListWithSurrounding = parseListWithSurroundingPrefix Nothing
 -- | Parse definition.
 --
 -- >>> parse parseDef "" "(def x 123)"
--- Right (Def (Var "x") (Literal (IntV 123)))
+-- Right (Def (Var "x") (Lit (IntV 123)))
 --
 parseDef :: Parser Exp
 parseDef = try $ do
@@ -274,18 +274,18 @@ parseDef = try $ do
 -- | Parse unary function calls.
 --
 -- >>> parse parseUnaryApp "" "(x 123)"
--- Right (UnaryApp (Var "x") (Literal (IntV 123)))
+-- Right (UnaryApp (Var "x") (Lit (IntV 123)))
 --
 -- Curry (x 1 2) as ((x 1) 2):
 --
 -- >>> parse parseUnaryApp "" "(x 1 2)"
--- Right (UnaryApp (UnaryApp (Var "x") (Literal (IntV 1))) (Literal (IntV 2)))
+-- Right (UnaryApp (UnaryApp (Var "x") (Lit (IntV 1))) (Lit (IntV 2)))
 --
 -- >>> parse parseUnaryApp "" "(x 1 2 3)"
--- Right (UnaryApp (UnaryApp (UnaryApp (Var "x") (Literal (IntV 1))) (Literal (IntV 2))) (Literal (IntV 3)))
+-- Right (UnaryApp (UnaryApp (UnaryApp (Var "x") (Lit (IntV 1))) (Lit (IntV 2))) (Lit (IntV 3)))
 --
 -- >>> parse parseUnaryApp "" "((fn [x y z] (+ x y)) 1 2 3)"
--- Right (UnaryApp (UnaryApp (UnaryApp (Fun (Var "x") (Fun (Var "y") (Fun (Var "z") (UnaryApp (UnaryApp (Var "+") (Var "x")) (Var "y"))))) (Literal (IntV 1))) (Literal (IntV 2))) (Literal (IntV 3)))
+-- Right (UnaryApp (UnaryApp (UnaryApp (Fun (Var "x") (Fun (Var "y") (Fun (Var "z") (UnaryApp (UnaryApp (Var "+") (Var "x")) (Var "y"))))) (Lit (IntV 1))) (Lit (IntV 2))) (Lit (IntV 3)))
 --
 parseUnaryApp :: Parser Exp
 parseUnaryApp = try $ do
@@ -302,11 +302,11 @@ parseUnaryApp = try $ do
 -- >>> buildAppStack (Var "x") []
 -- NullaryApp (Var "x")
 --
--- >>> buildAppStack (Var "x") [Literal (IntV 1)]
--- UnaryApp (Var "x") (Literal (IntV 1))
+-- >>> buildAppStack (Var "x") [Lit (IntV 1)]
+-- UnaryApp (Var "x") (Lit (IntV 1))
 --
--- >>> buildAppStack (Var "x") [Literal (IntV 1),Literal (IntV 2),Literal (IntV 3)]
--- UnaryApp (UnaryApp (UnaryApp (Var "x") (Literal (IntV 1))) (Literal (IntV 2))) (Literal (IntV 3))
+-- >>> buildAppStack (Var "x") [Lit (IntV 1),Lit (IntV 2),Lit (IntV 3)]
+-- UnaryApp (UnaryApp (UnaryApp (Var "x") (Lit (IntV 1))) (Lit (IntV 2))) (Lit (IntV 3))
 --
 buildAppStack :: Exp -> [Exp] -> Exp
 buildAppStack fn [] = NullaryApp fn
@@ -334,7 +334,7 @@ parseNullaryApp = do
 -- | Parse functions.
 --
 -- >>> parse parseFun "" "(fn [x] (+ x 123))"
--- Right (Fun (Var "x") (UnaryApp (UnaryApp (Var "+") (Var "x")) (Literal (IntV 123))))
+-- Right (Fun (Var "x") (UnaryApp (UnaryApp (Var "+") (Var "x")) (Lit (IntV 123))))
 --
 -- >>> parse parseFun "" "(fn [x y z] (x y z))"
 -- Right (Fun (Var "x") (Fun (Var "y") (Fun (Var "z") (UnaryApp (UnaryApp (Var "x") (Var "y")) (Var "z")))))
@@ -383,7 +383,7 @@ parseVecOfVars = do
 -- | Parse let expressions.
 --
 -- >>> parse parseLet "" "(let [x 1 y 2] (+ x y))"
--- Right (Let (Var "x") (Literal (IntV 1)) (Let (Var "y") (Literal (IntV 2)) (UnaryApp (UnaryApp (Var "+") (Var "x")) (Var "y"))))
+-- Right (Let (Var "x") (Lit (IntV 1)) (Let (Var "y") (Lit (IntV 2)) (UnaryApp (UnaryApp (Var "+") (Var "x")) (Var "y"))))
 --
 -- >>> isLeft $ parse parseLet "" "(let [] (+ x y))"
 -- True
@@ -407,7 +407,7 @@ buildLetBindingStack _ _ = error "let has invalid bindings"
 -- | Parse (var, exp) pairs. Must have at least one.
 --
 -- >>> parse parseVarExpPairs "" "[x 1 y 2]"
--- Right [(Var "x",Literal (IntV 1)),(Var "y",Literal (IntV 2))]
+-- Right [(Var "x",Lit (IntV 1)),(Var "y",Lit (IntV 2))]
 --
 -- >>> isLeft $ parse parseLet "" "[]"
 -- True
@@ -432,13 +432,13 @@ parseVarExpPair = do
 -- | Parse expression.
 --
 -- >>> parse parseExp "" "\"abc\""
--- Right (Literal (StringV "abc"))
+-- Right (Lit (StringV "abc"))
 --
 -- >>> parse parseExp "" "true"
--- Right (Literal (BoolV True))
+-- Right (Lit (BoolV True))
 --
 -- >>> parse parseExp "" "123"
--- Right (Literal (IntV 123))
+-- Right (Lit (IntV 123))
 --
 -- >>> parse parseExp "" "x"
 -- Right (Var "x")
@@ -453,7 +453,7 @@ parseVarExpPair = do
 -- Right (Var "+")
 --
 -- >>> parse parseExp "" "(def x 123)"
--- Right (Def (Var "x") (Literal (IntV 123)))
+-- Right (Def (Var "x") (Lit (IntV 123)))
 --
 -- >>> parse parseExp "" "(foo bar)"
 -- Right (UnaryApp (Var "foo") (Var "bar"))
@@ -462,7 +462,7 @@ parseVarExpPair = do
 -- Right (NullaryApp (Var "foo"))
 --
 -- >>> parse parseExp "" "(let [x 1 y 2] (+ x y))"
--- Right (Let (Var "x") (Literal (IntV 1)) (Let (Var "y") (Literal (IntV 2)) (UnaryApp (UnaryApp (Var "+") (Var "x")) (Var "y"))))
+-- Right (Let (Var "x") (Lit (IntV 1)) (Let (Var "y") (Lit (IntV 2)) (UnaryApp (UnaryApp (Var "+") (Var "x")) (Var "y"))))
 --
 parseExp :: Parser Exp
 parseExp =
@@ -481,7 +481,7 @@ parseExp =
 -- | Parse a line of expression.
 --
 -- >>> parse parseLine "" "[+ - >>= abc-def 123]"
--- Right (List [Var "+",Var "-",Var ">>=",Var "abc-def",Literal (IntV 123)])
+-- Right (List [Var "+",Var "-",Var ">>=",Var "abc-def",Lit (IntV 123)])
 --
 -- >>> isLeft $ parse parseLine "" "+ 13"
 -- True
@@ -499,7 +499,7 @@ parseLine = do
 -- | Parse a Neblen program.
 --
 -- >>> parseProgram "(+ 1 2)"
--- Right (UnaryApp (UnaryApp (Var "+") (Literal (IntV 1))) (Literal (IntV 2)))
+-- Right (UnaryApp (UnaryApp (Var "+") (Lit (IntV 1))) (Lit (IntV 2)))
 --
 -- >>> parseProgram "(fn [x] x)"
 -- Right (Fun (Var "x") (Var "x"))
