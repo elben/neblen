@@ -155,7 +155,7 @@ testCheckNullFun =
 testcheckFun :: [Test]
 testcheckFun =
   [
-    testCase "checkFun: (fn [x] (fn [y] 0))" $
+    testCase "checkFun: (fn [x] (fn [y] 0)) : (-> a (-> b Int))" $
     run (check emptyTEnv emptyUEnv (Fun (Var "x") (Fun (Var "y") (Lit (IntV 0)))))
     @?= (M.fromList [],M.fromList [],TFun (TVar "a") (TFun (TVar "b") TInt))
 
@@ -172,7 +172,7 @@ testcheckFun =
     run (check emptyTEnv emptyUEnv (Fun (Var "x") (UnaryApp (Var "x") (Lit (IntV 3)))))
     @?= (M.fromList [],M.fromList [("a",TFun TInt (TVar "b"))],TFun (TFun TInt (TVar "b")) (TVar "b"))
 
-  , testCase "checkFun: (fn [x] (let [z (fn [y] (x 3))] x))" $
+  , testCase "checkFun: (fn [x] (let [z (fn [y] (x 3))] x)) : (-> (-> Int a) (-> Int a))" $
     run (check emptyTEnv emptyUEnv (Fun (Var "x") (Let (Var "z") (Fun (Var "y") (UnaryApp (Var "x") (Lit (IntV 3)))) (Var "x"))))
     @?= (M.fromList [],M.fromList [("a",TFun TInt (TVar "c"))],TFun (TFun TInt (TVar "c")) (TFun TInt (TVar "c")))
 
@@ -186,10 +186,25 @@ testcheckFun =
     expectE (check emptyTEnv emptyUEnv (Fun (Var "x") (UnaryApp (Var "x") (Var "x"))))
     @?= InfiniteType (TVar "a") (TFun (TVar "a") (TVar "b"))
 
-  , testCase "checkFun: ((fn [x] x 3) (fn [x] x))" $
+  , testCase "checkFun: ((fn [x] x 3) (fn [x] x)) : Int" $
     run (check emptyTEnv emptyUEnv (UnaryApp (Fun (Var "x") (UnaryApp (Var "x") (Lit (IntV 3)))) (Fun (Var "x") (Var "x"))))
     @?= (M.fromList [],M.fromList [("a",TFun TInt (TVar "b")),("b",TInt),("c",TInt)],TInt)
 
+  , testCase "checkFun: (fn [f] (fn [x] (f x))) : (-> (-> a b) (-> a b))" $
+    (runCheck emptyTEnv emptyUEnv (Fun (Var "f") (Fun (Var "x") (UnaryApp (Var "f") (Var "x")))))
+    @?= (M.fromList [],M.fromList [("a",TFun (TVar "b") (TVar "c"))],(TFun (TFun (TVar "b") (TVar "c")) (TFun (TVar "b") (TVar "c"))))
+
+  -- tenv:
+  -- f -> a
+  -- x -> b
+  --
+  -- The "double" function from Pierce (pg 333)
+  , testCase "checkFun: (fn [f] (fn [x] (f (f x)))) : (-> (-> a a) (-> a a))" $
+    run (check emptyTEnv emptyUEnv (Fun (Var "f") (Fun (Var "x") (UnaryApp (Var "f") (UnaryApp (Var "f") (Var "x"))))))
+    @?= (M.fromList [],M.fromList [("a",TFun (TVar "b") (TVar "c"))],(TFun (TFun (TVar "a") (TVar "a")) (TFun (TVar "a") (TVar "a"))))
+
+  -- Using the double function polymorphically.
+  -- TODO write tests
   ]
 
 testCheckNullApp :: [Test]

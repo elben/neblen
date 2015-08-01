@@ -149,9 +149,6 @@ unifyTVar uenv (TVar tv) t2 =
       unify uenv t1 t2
 unifyTVar _ _ _ = error "bad call to unifyTVar"
 
-runUnify :: TypeCheck (UEnv, Type) -> Either TypeError (UEnv, Type)
-runUnify uc = evalState (runExceptT uc) initFreshCounter
-
 -- This occurs check asserts that if we are applying a substitution of variable
 -- x to an expression e, the variable x cannot be free in e. Otherwise the
 -- rewrite would diverge, constantly rewriting itself.
@@ -206,27 +203,27 @@ insertEnv tenv name t = M.insert name t tenv
 
 check :: TEnv -> UEnv -> Exp -> TypeCheck (TEnv, UEnv, Type)
 check tenv uenv e = case e of
-  (Lit lit) ->
+  Lit lit ->
     case lit of
       IntV _ -> return (tenv, uenv, TInt)
       BoolV _ -> return (tenv, uenv, TBool)
       StringV _ -> return (tenv, uenv, TString)
 
-  (Var v) ->
+  Var v ->
     case lookupEnv tenv v of
       Just t  -> return (tenv, uenv, t)
       Nothing -> throwE (UnboundVariable v)
 
-  (Let (Var v) val body) -> do
+  Let (Var v) val body -> do
     (tenv', uenv', valT) <- check tenv uenv val
     let tenv'' = insertEnv tenv' v valT
     (_, uenv'', valB) <- check tenv'' uenv' body
     -- Return original tenv because 'v' is no longer in scope.
     return (tenv, uenv'', valB)
 
-  (Let _ _ _) -> throwE (GenericTypeError (Just "Let binding must be a variable"))
+  Let{} -> throwE (GenericTypeError (Just "Let binding must be a variable"))
 
-  (List elems) ->
+  List elems ->
     case elems of
       [] -> getFresh >>= (\tv -> return (tenv, uenv, TList tv))
       [el] -> do
@@ -238,7 +235,7 @@ check tenv uenv e = case e of
         (uenv''', _) <- unify uenv'' e1T e2T
         check tenv uenv''' (List (e2:es))
 
-  (If p t body) -> do
+  If p t body -> do
     (_, uenv', pT) <- check tenv uenv p
     case pT of
       TBool -> do
@@ -248,9 +245,9 @@ check tenv uenv e = case e of
         return (tenv, uenv'''', retT)
       otherT -> throwE $ Mismatch TBool otherT
 
-  (NullaryFun body) -> check tenv uenv body
+  NullaryFun body -> check tenv uenv body
 
-  (Fun (Var v) body) -> do
+  Fun (Var v) body -> do
     -- Get fresh type variable for argument variable, and bind the arg var to this
     -- type var.
     tv <- getFresh
@@ -262,13 +259,17 @@ check tenv uenv e = case e of
     let argT = fromMaybe tv (lookupEnv tenv'' v)
     return (tenv, uenv', TFun (replaceAllTVars uenv' argT) (replaceAllTVars uenv' bodyT))
 
-  (Fun _ _) -> throwE (GenericTypeError (Just "Fun binding must be a variable"))
+  Fun{} -> throwE (GenericTypeError (Just "Fun binding must be a variable"))
 
-  (NullaryApp body) -> check tenv uenv body
+  NullaryApp body -> check tenv uenv body
 
-  (UnaryApp fn arg) -> do
+  UnaryApp fn arg -> do
     (_, uenv', fnT) <- check tenv uenv fn
     (_, uenv'', argT) <- check tenv uenv' arg
+    -- retT <- getFresh
+    -- (uenv''', fnT') <- unify uenv'' fnT (TFun argT retT)
+    -- return (tenv, uenv''', fnT')
+
     case fnT of
       -- If function term is a function, then unify the argument type and return
       -- the return type.
@@ -279,8 +280,8 @@ check tenv uenv e = case e of
       -- If function term is a var, unify that var with what we think the
       -- function's type should be (given the type of the argument).
       (TVar fnVarT) -> do
-        fnbT <- getFresh
-        (uenv''', fnT') <- unify uenv'' (TVar fnVarT) (TFun argT fnbT)
+        retT <- getFresh
+        (uenv''', fnT') <- unify uenv'' (TVar fnVarT) (TFun argT retT)
         -- We partially know the type of the function. Add that to
         -- the tenv so that parent can use it in their type check.
         let tenv' = insertEnv tenv fnVarT fnT'
@@ -291,53 +292,15 @@ check tenv uenv e = case e of
         retT <- getFresh
         throwE (Mismatch (TFun argT retT) t)
 
-  (Def _ _) -> error "TODO"
-  (Add _ _) -> error "TODO"
+  Def{} -> error "TODO"
+  Add{} -> error "TODO"
 
--- | Check unary function call.
---
--- Below is self application (see Pierce pg 345):
---   Environment: f : (-> a a)
---   ((fn [x] x x) f) : (-> (-> a a) (-> a a))
---
---   ((fn [x] x x) f)
---     : (-> c c) f          uenv: {c = x}         env: {f = (-> a a)}
---       Look up 'f' in env
---     = (-> c c) (-> a a)   uenv: {c = x}         env: {f = (-> a a)}
---       Apply function
---     = (-> a a) c          uenv: {c = (-> a a)}  env: {f = (-> a a), x = (-> a a)}
---       Lookup 'c'
---     = (-> a a) (-> a a)   uenv: {c = (-> a a)}  env: {f = (-> a a), x = (-> a a)}
---         ^ This is a problem! This is an infinite type.
---
---    What we want is this:
---
---       Give different fresh variables to argument and return types.
---     : (-> c d) f          uenv: {c = x, d = x}         env: {f = (-> a a)}
---       Look up 'f' in env, replace 'x'
---     = (-> c d) (-> a a)   uenv: {c = x, d = x}         env: {x = (-> a a), f = (-> a a)}
---       Apply function
---     = (-> a a) d          uenv: {c = (-> a a), d = x}  env: {f = (-> a a), x = (-> a a)}
---       Lookup 'd'
---     = (-> a a) (-> b b)   uenv: {c = (-> a a), d = (-> b b)}  env: {f = (-> a a), x = (-> a a)}
---
---         ^ The key is that 'f' is polymorphic, and we should get fresh variables
---         for each use of f. That is, we should have (-> a a) and (-> b b).
---
---     = (-> (-> b b) (-> b b))
---
---   It USED to work. But now it's an infinite type error. Is this correct?
---
---   In Haskell:
---
---     Allowed: id id
---
---     Not allowed: ((\x -> x x) id)
---     Works: ((\x -> x x) id)
---
--- >>> runCheck (M.fromList [("f",TFun (TVar "a") (TVar "a"))]) emptyUEnv (UnaryApp (Fun (Var "x") (UnaryApp (Var "x") (Var "x"))) (Var "f"))
--- (fromList [("f",(-> a a))],fromList [("x",(-> a a))],(-> (-> a a) (-> a a)))
---
+------------------------------------------
+-- Helpers to run the monad transformers.
+------------------------------------------
+
+runUnify :: TypeCheck (UEnv, Type) -> Either TypeError (UEnv, Type)
+runUnify uc = evalState (runExceptT uc) initFreshCounter
 
 runCheck :: TEnv -> UEnv -> Exp -> (TEnv, UEnv, Type)
 runCheck tenv uenv expr =
