@@ -68,6 +68,7 @@ instance Show Type where
 data TypeScheme = Forall [TName] Type
 
 data TypeError = Mismatch Type Type
+               | FunctionExpected Type
                | UnboundVariable Name
                | InfiniteType Type Type -- InfiniteType TVar Type
                | GenericTypeError (Maybe String)
@@ -82,6 +83,7 @@ genericTypeError msg = GenericTypeError (Just msg)
 
 instance Show TypeError where
   show (Mismatch t1 t2) = "type mismatch: expecting " ++ show t1 ++ " but got " ++ show t2
+  show (FunctionExpected t) = "type mismatch: expecting function but got " ++ show t
   show (UnboundVariable n) = "unbound variable " ++ n
   show (InfiniteType tvar t) = "cannot resolve infinite type " ++ show tvar ++ " in " ++ show t
   show (GenericTypeError (Just msg)) = "type error: " ++ msg
@@ -94,6 +96,28 @@ initFreshCounter = FreshCounter { getFreshCounter = 0 }
 
 letters :: [String]
 letters = [1..] >>= flip replicateM ['a'..'z']
+
+-- Compose two UEnvs together: apply u1's substitutions over u2's values.
+-- Example:
+--
+--   u1: {c -> b}
+--   u2: {a -> (-> b c)}
+--   (compose u1 u2): {a -> (-> b b), c -> b}
+--
+-- Note that order matters. u1's mapping is applied to u2's mapping, but
+-- not vice-versa.
+--
+-- >>> compose (M.fromList [("c", TVar "b")]) (M.fromList [("a", TFun (TVar "b") (TVar "c"))])
+-- fromList [("a",(-> b b)),("c",b)]
+--
+-- Below composes the wrong way. The resulting uenv is not useful (as the
+-- variables aren't all properly substituted).
+--
+-- >>> compose (M.fromList [("a", TFun (TVar "b") (TVar "c"))]) (M.fromList [("c", TVar "b")])
+-- fromList [("a",(-> b c)),("c",b)]
+--
+compose :: UEnv -> UEnv -> UEnv
+compose u1 u2 = M.union (M.map (replaceAllTVars u1) u2) u1
 
 -- | Unify types.
 --
@@ -109,6 +133,9 @@ unify uenv (TFun a1 r1) (TFun a2 r2) = do
   -- We now have a u-env built from both argument and return types. Substitue
   -- any remaining type variables.
   return (uenv'', TFun (replaceAllTVars uenv'' ta) (replaceAllTVars uenv'' tr))
+
+-- Assume order implies attempted function call on a non-function.
+unify _ t TFun{} = throwE (FunctionExpected t)
 unify _ t1 t2 = throwE $ Mismatch t1 t2
 
 unifyTVar :: UEnv -> Type -> Type -> TypeCheck (UEnv, Type)
@@ -266,31 +293,31 @@ check tenv uenv e = case e of
   UnaryApp fn arg -> do
     (_, uenv', fnT) <- check tenv uenv fn
     (_, uenv'', argT) <- check tenv uenv' arg
-    -- retT <- getFresh
-    -- (uenv''', fnT') <- unify uenv'' fnT (TFun argT retT)
-    -- return (tenv, uenv''', fnT')
+    retT <- getFresh
+    (uenv''', _) <- unify uenv'' fnT (TFun argT retT)
+    return (tenv, uenv''', replaceAllTVars uenv''' retT)
 
-    case fnT of
-      -- If function term is a function, then unify the argument type and return
-      -- the return type.
-      (TFun fna fnb) -> do
-        (uenv''', _) <- unify uenv'' fna argT
-        return (tenv, uenv''', replaceAllTVars uenv''' fnb)
+    -- case fnT of
+    --   -- If function term is a function, then unify the argument type and return
+    --   -- the return type.
+    --   (TFun fna fnb) -> do
+    --     (uenv''', _) <- unify uenv'' fna argT
+    --     return (tenv, uenv''', replaceAllTVars uenv''' fnb)
 
-      -- If function term is a var, unify that var with what we think the
-      -- function's type should be (given the type of the argument).
-      (TVar fnVarT) -> do
-        retT <- getFresh
-        (uenv''', fnT') <- unify uenv'' (TVar fnVarT) (TFun argT retT)
-        -- We partially know the type of the function. Add that to
-        -- the tenv so that parent can use it in their type check.
-        let tenv' = insertEnv tenv fnVarT fnT'
-        return (tenv', uenv''', replaceAllTVars uenv''' (funReturnType fnT'))
+    --   -- If function term is a var, unify that var with what we think the
+    --   -- function's type should be (given the type of the argument).
+    --   (TVar fnVarT) -> do
+    --     retT <- getFresh
+    --     (uenv''', fnT') <- unify uenv'' (TVar fnVarT) (TFun argT retT)
+    --     -- We partially know the type of the function. Add that to
+    --     -- the tenv so that parent can use it in their type check.
+    --     let tenv' = insertEnv tenv fnVarT fnT'
+    --     return (tenv', uenv''', replaceAllTVars uenv''' (funReturnType fnT'))
 
-      -- Error case: function term isn't a function or variable.
-      t -> do
-        retT <- getFresh
-        throwE (Mismatch (TFun argT retT) t)
+    --   -- Error case: function term isn't a function or variable.
+    --   t -> do
+    --     retT <- getFresh
+    --     throwE (Mismatch (TFun argT retT) t)
 
   Def{} -> error "TODO"
   Add{} -> error "TODO"
