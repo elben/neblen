@@ -197,7 +197,7 @@ testcheckFun =
   -- The "double" function from Pierce (pg 333)
   , testCase "checkFun: (fn [f] (fn [x] (f (f x)))) : (-> (-> a a) (-> a a))" $
     run (check emptyTEnv emptyUEnv (Fun (Var "f") (Fun (Var "x") (UnaryApp (Var "f") (UnaryApp (Var "f") (Var "x"))))))
-    @?= (M.fromList [],M.fromList [("a",TFun (TVar "b") (TVar "c")),("c",TVar "b"),("d",TVar "b")],(TFun (TFun (TVar "b") (TVar "b")) (TFun (TVar "b") (TVar "b"))))
+    @?= (M.fromList [],M.fromList [("a",TFun (TVar "b") (TVar "b")),("c",TVar "b"),("d",TVar "b")],(TFun (TFun (TVar "b") (TVar "b")) (TFun (TVar "b") (TVar "b"))))
 
   -- Using the double function polymorphically.
   -- TODO write tests
@@ -248,11 +248,11 @@ testCheckUnaryApp =
 
   , testCase "checkUnaryApp: (((fn [x] (fn [y] x)) 0) True)" $
     run (check emptyTEnv emptyUEnv (UnaryApp (UnaryApp (Fun (Var "x") (Fun (Var "y") (Var "x"))) (Lit (IntV 0))) (Lit (BoolV True))))
-    @?= (M.fromList [],M.fromList [("a",TInt),("b",TBool),("c",TFun (TVar "b") TInt),("d",TInt)],TInt)
+    @?= (M.fromList [],M.fromList [("a",TInt),("b",TBool),("c",TFun TBool TInt),("d",TInt)],TInt)
 
   , testCase "checkUnaryApp: ((fn [x] x 3) (fn [x] x)) : Int" $
     run (check emptyTEnv emptyUEnv (UnaryApp (Fun (Var "x") (UnaryApp (Var "x") (Lit (IntV 3)))) (Fun (Var "x") (Var "x"))))
-    @?= (M.fromList [],M.fromList [("a",TFun TInt (TVar "b")),("b",TInt),("c",TInt),("d",TInt)],TInt)
+    @?= (M.fromList [],M.fromList [("a",TFun TInt TInt),("b",TInt),("c",TInt),("d",TInt)],TInt)
 
   , testCase "checkUnaryApp: (x 0) unbound variable" $
     expectE (check emptyTEnv emptyUEnv (UnaryApp (Var "x") (Lit (IntV 0))))
@@ -273,7 +273,7 @@ testCheckUnaryApp =
 
   , testCase "checkUnaryApp: x : (-> z z) => ((fn [y] (y 3)) x) : Int" $
     run (check (M.fromList [("x", TFun (TVar "z") (TVar "z"))]) emptyUEnv (UnaryApp (Fun (Var "y") (UnaryApp (Var "y") (Lit (IntV 3)))) (Var "x")))
-    @?= (M.fromList [("x",TFun (TVar "z") (TVar "z"))],M.fromList [("a",TFun TInt (TVar "b")),("b",TInt),("c",TInt),("z",TInt)],TInt)
+    @?= (M.fromList [("x",TFun (TVar "z") (TVar "z"))],M.fromList [("a",TFun TInt TInt),("b",TInt),("c",TInt),("z",TInt)],TInt)
   ]
 
 testCheckList :: [Test]

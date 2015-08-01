@@ -119,7 +119,19 @@ letters = [1..] >>= flip replicateM ['a'..'z']
 compose :: UEnv -> UEnv -> UEnv
 compose u1 u2 = M.union (M.map (replaceAllTVars u1) u2) u1
 
+-- Compose UEnvs left-to-right. See 'compose' function for comments.
+--
+-- >>> composeAll [(M.fromList [("c", TVar "b")]) (M.fromList [("a", TFun (TVar "b") (TVar "c"))])]
+-- fromList [("a",(-> b b)),("c",b)]
+--
+composeAll :: [UEnv] -> UEnv
+composeAll = foldl (\c u -> c `compose` u) emptyUEnv
+
 -- | Unify types.
+--
+-- TODO: what if this just returns the UEnv, then users "apply" (see
+-- write-you-a-haskell chatper 7 poly example) the new uenv with their old
+-- stuff. This may simplify a lot of stuff!
 --
 unify :: UEnv -> Type -> Type -> TypeCheck (UEnv, Type)
 unify uenv TInt TInt = return (uenv, TInt)
@@ -132,7 +144,7 @@ unify uenv (TFun a1 r1) (TFun a2 r2) = do
   (uenv'', tr) <- unify uenv' (replaceAllTVars uenv' r1) (replaceAllTVars uenv' r2)
   -- We now have a u-env built from both argument and return types. Substitue
   -- any remaining type variables.
-  return (uenv'', TFun (replaceAllTVars uenv'' ta) (replaceAllTVars uenv'' tr))
+  return (composeAll [uenv'', uenv', uenv], TFun (replaceAllTVars uenv'' ta) (replaceAllTVars uenv'' tr))
 
 -- Assume order implies attempted function call on a non-function.
 unify _ t TFun{} = throwE (FunctionExpected t)
@@ -161,17 +173,16 @@ unifyTVar uenv (TVar tv) t2 =
                                   -- UEnv: {b -> a}
                                   -- Returned: a
                                   return (insertEnv uenv tv2 (TVar tv), TVar tv)
-                                  -- return (insertEnv (insertEnv uenv tv (TVar tv2)) tv2 (TVar tv), TVar tv)
 
                       -- Resolved RHS. In the example above, b (RHS) is resolved to
                       -- Int. So we need to update uenv to {b -> Int, a -> Int}
                       Just t2' -> let uenv' = insertEnv uenv tv2 t2'
                                       uenv'' = insertEnv uenv' tv t2'
-                                  in unify (insertEnv uenv'' tv2 t2') (TVar tv2) t2'
+                                  in unify (composeAll [uenv'', uenv', uenv]) (TVar tv2) t2'
         _      -> if occursCheck tv t2
                   then throwE $ InfiniteType (TVar tv) t2
                   else let uenv' = insertEnv uenv tv t2
-                       in unify uenv' (TVar tv) t2
+                       in unify (composeAll [uenv', uenv]) (TVar tv) t2
     Just t1 ->
       unify uenv t1 t2
 unifyTVar _ _ _ = error "bad call to unifyTVar"
@@ -246,7 +257,7 @@ check tenv uenv e = case e of
     let tenv'' = insertEnv tenv' v valT
     (_, uenv'', valB) <- check tenv'' uenv' body
     -- Return original tenv because 'v' is no longer in scope.
-    return (tenv, uenv'', valB)
+    return (tenv, composeAll [uenv'', uenv', uenv], valB)
 
   Let{} -> throwE (GenericTypeError (Just "Let binding must be a variable"))
 
@@ -255,12 +266,12 @@ check tenv uenv e = case e of
       [] -> getFresh >>= (\tv -> return (tenv, uenv, TList tv))
       [el] -> do
         (_, uenv', eT) <- check tenv uenv el
-        return (tenv, uenv', TList eT)
+        return (tenv, composeAll [uenv', uenv], TList eT)
       (e1:e2:es) -> do
         (_, uenv', e1T) <- check tenv uenv e1
         (_, uenv'', e2T) <- check tenv uenv' e2
         (uenv''', _) <- unify uenv'' e1T e2T
-        check tenv uenv''' (List (e2:es))
+        check tenv (composeAll [uenv''', uenv'', uenv', uenv]) (List (e2:es))
 
   If p t body -> do
     (_, uenv', pT) <- check tenv uenv p
@@ -269,7 +280,7 @@ check tenv uenv e = case e of
         (_, uenv'', tT) <- check tenv uenv' t
         (_, uenv''', eT) <- check tenv uenv'' body
         (uenv'''', retT) <- unify uenv''' tT eT
-        return (tenv, uenv'''', retT)
+        return (tenv, composeAll [uenv'''', uenv''', uenv'', uenv', uenv], retT)
       otherT -> throwE $ Mismatch TBool otherT
 
   NullaryFun body -> check tenv uenv body
