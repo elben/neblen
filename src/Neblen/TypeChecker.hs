@@ -52,7 +52,7 @@ data Type = TInt
           | TFun Type Type
           | TList Type
           | TVar TName
-  deriving (Eq)
+  deriving (Eq, Ord)
 
 instance Show Type where
   show TInt = "Int"
@@ -97,7 +97,40 @@ initFreshCounter = FreshCounter { getFreshCounter = 0 }
 letters :: [String]
 letters = [1..] >>= flip replicateM ['a'..'z']
 
--- Compose two UEnvs together: apply u1's substitutions over u2's values.
+-- Something is Subsitutable if you can apply the given UEnv to it, substituting
+-- type variables in 't' with its mapping in the UEnv.
+class Substitutable t where
+  -- Substitute free type variables in 't' with mapping found in UEnv.
+  apply :: UEnv -> t -> t
+
+  -- Returns list of type variables found in 't'.
+  tvars :: t -> S.Set Type
+
+instance Substitutable a => Substitutable [a] where
+  apply s = map (apply s)
+
+  tvars = foldl (\tvs t -> S.union tvs (tvars t)) S.empty
+
+-- | Replace all the type variables with its mapping.
+--
+-- >>> apply (M.fromList [("a",TVar "x"),("b",TInt)]) (TFun (TVar "a") (TFun (TVar "b") TString))
+-- (-> x (-> Int String))
+--
+-- >>> tvars (TFun (TVar "a") (TFun (TVar "b") TString))
+-- fromList [a,b]
+--
+instance Substitutable Type where
+  apply uenv (TVar tv) = fromMaybe (TVar tv) (lookupEnv uenv tv)
+  apply uenv (TFun a r) = TFun (apply uenv a) (apply uenv r)
+  apply uenv (TList t) = TList (apply uenv t)
+  apply _ t = t
+
+  tvars (TVar tv) = S.singleton (TVar tv)
+  tvars (TFun a r) = S.union (tvars a) (tvars r)
+  tvars (TList t) = tvars t
+  tvars _ = S.empty
+
+-- | Compose two UEnvs together: apply u1's substitutions over u2's values.
 -- Example:
 --
 --   u1: {c -> b}
@@ -117,15 +150,15 @@ letters = [1..] >>= flip replicateM ['a'..'z']
 -- fromList [("a",(-> b c)),("c",b)]
 --
 compose :: UEnv -> UEnv -> UEnv
-compose u1 u2 = M.union (M.map (replaceAllTVars u1) u2) u1
+compose u1 u2 = M.union (M.map (apply u1) u2) u1
 
--- Compose UEnvs left-to-right. See 'compose' function for comments.
+-- | Compose UEnvs left-to-right. See 'compose' function for comments.
 --
--- >>> composeAll [(M.fromList [("c", TVar "b")]) (M.fromList [("a", TFun (TVar "b") (TVar "c"))])]
+-- >>> composeAll [(M.fromList [("c", TVar "b")]), (M.fromList [("a", TFun (TVar "b") (TVar "c"))])]
 -- fromList [("a",(-> b b)),("c",b)]
 --
 composeAll :: [UEnv] -> UEnv
-composeAll = foldl (\c u -> c `compose` u) emptyUEnv
+composeAll = foldl compose emptyUEnv
 
 -- | Unify types.
 --
@@ -141,17 +174,17 @@ unify uenv (TVar tv) t2 = unifyTVar uenv (TVar tv) t2
 unify uenv t1 (TVar tv) = unifyTVar uenv (TVar tv) t1
 unify uenv (TFun a1 r1) (TFun a2 r2) = do
   (uenv', ta) <- unify uenv a1 a2
-  (uenv'', tr) <- unify uenv' (replaceAllTVars uenv' r1) (replaceAllTVars uenv' r2)
+  (uenv'', tr) <- unify uenv' (apply uenv' r1) (apply uenv' r2)
   -- We now have a u-env built from both argument and return types. Substitue
   -- any remaining type variables.
-  return (composeAll [uenv'', uenv', uenv], TFun (replaceAllTVars uenv'' ta) (replaceAllTVars uenv'' tr))
+  return (composeAll [uenv'', uenv', uenv], TFun (apply uenv'' ta) (apply uenv'' tr))
 
 -- Assume order implies attempted function call on a non-function.
 unify _ t TFun{} = throwE (FunctionExpected t)
 unify _ t1 t2 = throwE $ Mismatch t1 t2
 
 unifyTVar :: UEnv -> Type -> Type -> TypeCheck (UEnv, Type)
-unifyTVar uenv (TVar tv) t2 =
+unifyTVar uenv tvar@(TVar tv) t2 =
   case lookupEnv uenv tv of
     Nothing ->
       case t2 of
@@ -165,7 +198,7 @@ unifyTVar uenv (TVar tv) t2 =
                                   -- variable.
                                   return (uenv, TVar tv)
 
-                              | occursCheck tv t2 -> throwE $ InfiniteType (TVar tv) t2
+                              | occursCheck tvar t2 -> throwE $ InfiniteType (TVar tv) t2
                               | otherwise ->
                                   -- Unify free variables together.
                                   --
@@ -179,7 +212,7 @@ unifyTVar uenv (TVar tv) t2 =
                       Just t2' -> let uenv' = insertEnv uenv tv2 t2'
                                       uenv'' = insertEnv uenv' tv t2'
                                   in unify (composeAll [uenv'', uenv', uenv]) (TVar tv2) t2'
-        _      -> if occursCheck tv t2
+        _      -> if occursCheck tvar t2
                   then throwE $ InfiniteType (TVar tv) t2
                   else let uenv' = insertEnv uenv tv t2
                        in unify (composeAll [uenv', uenv]) (TVar tv) t2
@@ -187,7 +220,7 @@ unifyTVar uenv (TVar tv) t2 =
       unify uenv t1 t2
 unifyTVar _ _ _ = error "bad call to unifyTVar"
 
--- This occurs check asserts that if we are applying a substitution of variable
+-- | This occurs check asserts that if we are applying a substitution of variable
 -- x to an expression e, the variable x cannot be free in e. Otherwise the
 -- rewrite would diverge, constantly rewriting itself.
 --
@@ -199,33 +232,14 @@ unifyTVar _ _ _ = error "bad call to unifyTVar"
 -- variables are the same, it is OK (it is not infinite, we can just replace 'a'
 -- with any type once we resolve its type)
 --
--- >>> occursCheck "a" (TFun TInt (TVar "a"))
+-- >>> occursCheck (TVar "a") (TFun TInt (TVar "a"))
 -- True
 --
--- >>> occursCheck "a" (TFun TInt (TVar "b"))
+-- >>> occursCheck (TVar "a") (TFun TInt (TVar "b"))
 -- False
 --
-occursCheck :: TName -> Type -> Bool
-occursCheck tv t = S.member tv (findAllTVars t)
-
-findAllTVars :: Type -> S.Set TName
-findAllTVars (TVar t) = S.singleton t
-findAllTVars (TFun a r) = S.union (findAllTVars a) (findAllTVars r)
-findAllTVars (TList t) = findAllTVars t
-findAllTVars _ = S.empty
-
-replaceAllTVars :: UEnv -> Type -> Type
-replaceAllTVars uenv (TVar tv) = fromMaybe (TVar tv) (lookupEnv uenv tv)
-replaceAllTVars uenv (TFun a r) = TFun (replaceAllTVars uenv a) (replaceAllTVars uenv r)
-replaceAllTVars _ t = t
-
-typeVarName :: Type -> Name
-typeVarName (TVar n) = n
-typeVarName _ = error "Invalid call."
-
-funReturnType :: Type -> Type
-funReturnType (TFun _ t) = t
-funReturnType _ = error "Invalid call."
+occursCheck :: Type -> Type -> Bool
+occursCheck tv t = S.member tv (tvars t)
 
 emptyTEnv :: TEnv
 emptyTEnv = M.empty
@@ -295,7 +309,7 @@ check tenv uenv e = case e of
     -- May have figured out argument's type when body was checked. If not, use the
     -- fresh we got.
     let argT = fromMaybe tv (lookupEnv tenv'' v)
-    return (tenv, uenv', TFun (replaceAllTVars uenv' argT) (replaceAllTVars uenv' bodyT))
+    return (tenv, uenv', TFun (apply uenv' argT) (apply uenv' bodyT))
 
   Fun{} -> throwE (GenericTypeError (Just "Fun binding must be a variable"))
 
@@ -306,29 +320,7 @@ check tenv uenv e = case e of
     (_, uenv'', argT) <- check tenv uenv' arg
     retT <- getFresh
     (uenv''', _) <- unify uenv'' fnT (TFun argT retT)
-    return (tenv, uenv''', replaceAllTVars uenv''' retT)
-
-    -- case fnT of
-    --   -- If function term is a function, then unify the argument type and return
-    --   -- the return type.
-    --   (TFun fna fnb) -> do
-    --     (uenv''', _) <- unify uenv'' fna argT
-    --     return (tenv, uenv''', replaceAllTVars uenv''' fnb)
-
-    --   -- If function term is a var, unify that var with what we think the
-    --   -- function's type should be (given the type of the argument).
-    --   (TVar fnVarT) -> do
-    --     retT <- getFresh
-    --     (uenv''', fnT') <- unify uenv'' (TVar fnVarT) (TFun argT retT)
-    --     -- We partially know the type of the function. Add that to
-    --     -- the tenv so that parent can use it in their type check.
-    --     let tenv' = insertEnv tenv fnVarT fnT'
-    --     return (tenv', uenv''', replaceAllTVars uenv''' (funReturnType fnT'))
-
-    --   -- Error case: function term isn't a function or variable.
-    --   t -> do
-    --     retT <- getFresh
-    --     throwE (Mismatch (TFun argT retT) t)
+    return (tenv, uenv''', apply uenv''' retT)
 
   Def{} -> error "TODO"
   Add{} -> error "TODO"

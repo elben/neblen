@@ -24,3 +24,5 @@ doctest -isrc -Wall -fno-warn-type-defaults -fno-warn-unused-do-bind src/Neblen/
 [Anatomy of Programming Languages by William R. Cook](http://www.cs.utexas.edu/~wcook/anatomy/anatomy.htm)
 
 [The Typed Racket Guide](http://docs.racket-lang.org/ts-guide/)
+
+[Typing Haskell in Haskell](http://web.cecs.pdx.edu/~mpj/thih/TypingHaskellInHaskell.html#sec-atimonad)
