@@ -11,6 +11,8 @@ import Control.Monad.Trans.Class
 import Control.Monad.Trans.State
 import Control.Monad.Trans.Except
 
+import Debug.Trace
+
 -- $setup
 -- >>> :set -XOverloadedStrings
 -- >>> import qualified Data.Map.Strict as M
@@ -29,7 +31,7 @@ getFresh = do
   lift $ put s{getFreshCounter = getFreshCounter s + 1}
   return $ TVar (letters !! getFreshCounter s)
 
--- Mapping of variables (value vars, *not* type vars) to its type.
+-- Mapping of variables (value vars, *not* type variables) to its type.
 type TEnv = M.Map Name Type
 
 -- Type variable.
@@ -254,8 +256,17 @@ lookupEnv tenv name = M.lookup name tenv
 insertEnv :: TEnv -> Name -> Type -> TEnv
 insertEnv tenv name t = M.insert name t tenv
 
+-- | Check type.
+--
+-- (let [id (fn [x] x)]
+--   (let [y (id 3)]
+--     (let [z] (id true) 0)))
+--
+-- >>> runCheck emptyTEnv emptySubst (Let (Var "id") (Fun (Var "x") (Var "x")) (Let (Var "y") (UnaryApp (Var "id") (Lit (IntV 3))) (Let (Var "z") (UnaryApp (Var "id") (Lit (BoolV True))) (Lit (IntV 0)))))
+-- error!
+--
 check :: TEnv -> Subst -> Exp -> TypeCheck (TEnv, Subst, Type)
-check tenv s e = case e of
+check tenv s e = case (trace ("tenv: " ++ show tenv ++ "\tsubst: " ++ show s) e) of
   Lit lit ->
     case lit of
       IntV _ -> return (tenv, s, TInt)
