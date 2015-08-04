@@ -30,11 +30,11 @@ testUnifier :: [Test]
 testUnifier =
   [
     testCase "unify: Int <=> Int" $
-    run (unify emptyUEnv TInt TInt)
+    run (unify emptySubst TInt TInt)
     @?= (M.fromList [],TInt)
 
   , testCase "unify: Int <=> a" $
-    run (unify emptyUEnv TInt (TVar "a"))
+    run (unify emptySubst TInt (TVar "a"))
     @?= (M.fromList [("a",TInt)],TInt)
 
   , testCase "unify: a <=> b" $
@@ -42,15 +42,15 @@ testUnifier =
     @?= (M.fromList [("a",TInt),("b",TInt)],TInt)
 
   , testCase "unify: (-> Int Int) <=> (-> a b)" $
-    run (unify emptyUEnv (TFun TInt TInt) (TFun (TVar "a") (TVar "b")))
+    run (unify emptySubst (TFun TInt TInt) (TFun (TVar "a") (TVar "b")))
     @?= (M.fromList [("a",TInt),("b",TInt)],TFun TInt TInt)
 
   , testCase "unify: (-> Int a) <=> (-> a b)" $
-    run (unify emptyUEnv (TFun TInt (TVar "a")) (TFun (TVar "a") (TVar "b")))
+    run (unify emptySubst (TFun TInt (TVar "a")) (TFun (TVar "a") (TVar "b")))
     @?= (M.fromList [("a",TInt),("b",TInt)],TFun TInt TInt)
 
   , testCase "unify: (-> Int a) <=> (-> b b)" $
-    run (unify emptyUEnv (TFun TInt (TVar "a")) (TFun (TVar "b") (TVar "b")))
+    run (unify emptySubst (TFun TInt (TVar "a")) (TFun (TVar "b") (TVar "b")))
     @?= (M.fromList [("a",TInt),("b",TInt)],TFun TInt TInt)
 
   , testCase "unify: {b : Bool}: (-> a a) <=> (-> b b)" $
@@ -70,7 +70,7 @@ testUnifier =
     @?= (M.fromList [("b",TBool),("c",TVar "a"),("d",TBool)],TFun (TVar "a") TBool)
 
   , testCase "unify: (-> a a) <=> (-> a a)" $
-    run (unify emptyUEnv (TFun (TVar "a") (TVar "a")) (TFun (TVar "a") (TVar "a")))
+    run (unify emptySubst (TFun (TVar "a") (TVar "a")) (TFun (TVar "a") (TVar "a")))
     @?= (M.fromList [],TFun (TVar "a") (TVar "a"))
 
   , testCase "unify: a <=> Int" $
@@ -78,7 +78,7 @@ testUnifier =
     @?= Mismatch TBool TInt
 
   , testCase "unify: a <=> (-> a Int)" $
-    expectE (unify emptyUEnv (TVar "a") (TFun (TVar "a") TInt))
+    expectE (unify emptySubst (TVar "a") (TFun (TVar "a") TInt))
     @?= InfiniteType (TVar "a") (TFun (TVar "a") TInt)
   ]
 
@@ -96,15 +96,15 @@ testCheckLit :: [Test]
 testCheckLit =
   [
     testCase "checkLit" $
-    run (check emptyTEnv emptyUEnv (Lit (IntV 0)))
+    run (check emptyTEnv emptySubst (Lit (IntV 0)))
     @?= (M.fromList [],M.fromList [],TInt)
 
   , testCase "checkLit" $
-    run (check emptyTEnv emptyUEnv (Lit (BoolV True)))
+    run (check emptyTEnv emptySubst (Lit (BoolV True)))
     @?= (M.fromList [],M.fromList [],TBool)
 
   , testCase "checkLit" $
-    run (check emptyTEnv emptyUEnv (Lit (StringV "")))
+    run (check emptyTEnv emptySubst (Lit (StringV "")))
     @?= (M.fromList [],M.fromList [],TString)
   ]
 
@@ -112,11 +112,11 @@ testCheckVar :: [Test]
 testCheckVar =
   [
     testCase "checkVar" $
-    run (check (M.fromList [("x",TInt)]) emptyUEnv (Var "x"))
+    run (check (M.fromList [("x",TInt)]) emptySubst (Var "x"))
     @?= (M.fromList [("x",TInt)],M.fromList [],TInt)
 
   , testCase "checkVar" $
-    expectE (check emptyTEnv emptyUEnv (Var "x"))
+    expectE (check emptyTEnv emptySubst (Var "x"))
     @?= UnboundVariable "x"
   ]
 
@@ -124,19 +124,19 @@ testCheckLet :: [Test]
 testCheckLet =
   [
     testCase "checkLet: (let [x 0] x)" $
-    run (check emptyTEnv emptyUEnv (Let (Var "x") (Lit (IntV 0)) (Var "x")))
+    run (check emptyTEnv emptySubst (Let (Var "x") (Lit (IntV 0)) (Var "x")))
     @?= (M.fromList [],M.fromList [],TInt)
 
   , testCase "checkLet: (let [x 0] true)" $
-    run (check emptyTEnv emptyUEnv (Let (Var "x") (Lit (IntV 0)) (Lit (BoolV True))))
+    run (check emptyTEnv emptySubst (Let (Var "x") (Lit (IntV 0)) (Lit (BoolV True))))
     @?= (M.fromList [],M.fromList [],TBool)
 
   , testCase "checkLet: {b -> Bool}: (let [x 0] b)" $
-    run (check (M.fromList [("b",TBool)]) emptyUEnv (Let (Var "x") (Lit (IntV 0)) (Var "b")))
+    run (check (M.fromList [("b",TBool)]) emptySubst (Let (Var "x") (Lit (IntV 0)) (Var "b")))
     @?= (M.fromList [("b",TBool)],M.fromList [],TBool)
 
   , testCase "checkLet: x" $
-    expectE (check emptyTEnv emptyUEnv (Var "x"))
+    expectE (check emptyTEnv emptySubst (Var "x"))
     @?= UnboundVariable "x"
   ]
 
@@ -144,11 +144,11 @@ testCheckNullFun :: [Test]
 testCheckNullFun =
   [
     testCase "checkNullFun" $
-    run (check emptyTEnv emptyUEnv (NullaryFun (Lit (IntV 0))))
+    run (check emptyTEnv emptySubst (NullaryFun (Lit (IntV 0))))
     @?= (M.fromList [],M.fromList [],TInt)
 
   , testCase "checkNullFun" $
-    expectE (check emptyTEnv emptyUEnv (NullaryFun (Var "x")))
+    expectE (check emptyTEnv emptySubst (NullaryFun (Var "x")))
     @?= UnboundVariable "x"
   ]
 
@@ -156,38 +156,38 @@ testcheckFun :: [Test]
 testcheckFun =
   [
     testCase "checkFun: (fn [x] (fn [y] 0)) : (-> a (-> b Int))" $
-    run (check emptyTEnv emptyUEnv (Fun (Var "x") (Fun (Var "y") (Lit (IntV 0)))))
+    run (check emptyTEnv emptySubst (Fun (Var "x") (Fun (Var "y") (Lit (IntV 0)))))
     @?= (M.fromList [],M.fromList [],TFun (TVar "a") (TFun (TVar "b") TInt))
 
   -- TODO: Fix
   , testCase "checkFun: argument should not override outside scope: x : Bool => (fn [y] (fn [x] 0))" $
-    run (check (M.fromList [("x",TBool)]) emptyUEnv (Fun (Var "y") (Fun (Var "x") (Lit (IntV 0)))))
+    run (check (M.fromList [("x",TBool)]) emptySubst (Fun (Var "y") (Fun (Var "x") (Lit (IntV 0)))))
     @?= (M.fromList [("x",TBool)],M.fromList [],TFun (TVar "a") (TFun (TVar "b") TInt))
 
   , testCase "checkFun: (fn [x] (fn [y] x)) : (-> a (-> b a))" $
-    run (check emptyTEnv emptyUEnv (Fun (Var "x") (Fun (Var "y") (Var "x"))))
+    run (check emptyTEnv emptySubst (Fun (Var "x") (Fun (Var "y") (Var "x"))))
     @?= (M.fromList [],M.fromList [],TFun (TVar "a") (TFun (TVar "b") (TVar "a")))
 
   , testCase "checkFun: (fn [x] (x 3)) : (-> (-> Int a) a)" $
-    run (check emptyTEnv emptyUEnv (Fun (Var "x") (UnaryApp (Var "x") (Lit (IntV 3)))))
+    run (check emptyTEnv emptySubst (Fun (Var "x") (UnaryApp (Var "x") (Lit (IntV 3)))))
     @?= (M.fromList [],M.fromList [("a",TFun TInt (TVar "b"))],TFun (TFun TInt (TVar "b")) (TVar "b"))
 
   , testCase "checkFun: (fn [x] (let [z (fn [y] (x 3))] x)) : (-> (-> Int a) (-> Int a))" $
-    run (check emptyTEnv emptyUEnv (Fun (Var "x") (Let (Var "z") (Fun (Var "y") (UnaryApp (Var "x") (Lit (IntV 3)))) (Var "x"))))
+    run (check emptyTEnv emptySubst (Fun (Var "x") (Let (Var "z") (Fun (Var "y") (UnaryApp (Var "x") (Lit (IntV 3)))) (Var "x"))))
     @?= (M.fromList [],M.fromList [("a",TFun TInt (TVar "c"))],TFun (TFun TInt (TVar "c")) (TFun TInt (TVar "c")))
 
   , testCase "checkFun: (fn [a] (fn [x] (a x))) : (-> (-> a b) (-> a b))" $
-    run (check emptyTEnv emptyUEnv (Fun (Var "a") (Fun (Var "x") (UnaryApp (Var "a") (Var "x")))))
+    run (check emptyTEnv emptySubst (Fun (Var "a") (Fun (Var "x") (UnaryApp (Var "a") (Var "x")))))
     @?= (M.fromList [],M.fromList [("a",TFun (TVar "b") (TVar "c"))],TFun (TFun (TVar "b") (TVar "c")) (TFun (TVar "b") (TVar "c")))
 
   -- TODO: Fix, what is this type? Can this be resolved with let-polymorphism?
   -- We would have to unify to the most general type.
   , testCase "checkFun: (fn [x] x x)" $
-    expectE (check emptyTEnv emptyUEnv (Fun (Var "x") (UnaryApp (Var "x") (Var "x"))))
+    expectE (check emptyTEnv emptySubst (Fun (Var "x") (UnaryApp (Var "x") (Var "x"))))
     @?= InfiniteType (TVar "a") (TFun (TVar "a") (TVar "b"))
 
   , testCase "checkFun: (fn [f] (fn [x] (f x))) : (-> (-> a b) (-> a b))" $
-    (runCheck emptyTEnv emptyUEnv (Fun (Var "f") (Fun (Var "x") (UnaryApp (Var "f") (Var "x")))))
+    (runCheck emptyTEnv emptySubst (Fun (Var "f") (Fun (Var "x") (UnaryApp (Var "f") (Var "x")))))
     @?= (M.fromList [],M.fromList [("a",TFun (TVar "b") (TVar "c"))],(TFun (TFun (TVar "b") (TVar "c")) (TFun (TVar "b") (TVar "c"))))
 
   -- tenv:
@@ -196,7 +196,7 @@ testcheckFun =
   --
   -- The "double" function from Pierce (pg 333)
   , testCase "checkFun: (fn [f] (fn [x] (f (f x)))) : (-> (-> a a) (-> a a))" $
-    run (check emptyTEnv emptyUEnv (Fun (Var "f") (Fun (Var "x") (UnaryApp (Var "f") (UnaryApp (Var "f") (Var "x"))))))
+    run (check emptyTEnv emptySubst (Fun (Var "f") (Fun (Var "x") (UnaryApp (Var "f") (UnaryApp (Var "f") (Var "x"))))))
     @?= (M.fromList [],M.fromList [("a",TFun (TVar "b") (TVar "b")),("c",TVar "b"),("d",TVar "b")],(TFun (TFun (TVar "b") (TVar "b")) (TFun (TVar "b") (TVar "b"))))
 
   -- Using the double function polymorphically.
@@ -207,15 +207,15 @@ testCheckNullApp :: [Test]
 testCheckNullApp =
   [
     testCase "testNullApp" $
-    run (check (M.fromList [("x",TBool)]) emptyUEnv (NullaryApp (Var "x")))
+    run (check (M.fromList [("x",TBool)]) emptySubst (NullaryApp (Var "x")))
     @?= (M.fromList [("x",TBool)],M.fromList [],TBool)
 
   , testCase "testNullApp" $
-    run (check emptyTEnv emptyUEnv (NullaryApp (NullaryFun (Lit (BoolV True)))))
+    run (check emptyTEnv emptySubst (NullaryApp (NullaryFun (Lit (BoolV True)))))
     @?= (M.fromList [],M.fromList [],TBool)
 
   , testCase "testNullApp" $
-    expectE (check emptyTEnv emptyUEnv (NullaryApp (Var "x")))
+    expectE (check emptyTEnv emptySubst (NullaryApp (Var "x")))
     @?= UnboundVariable "x"
   ]
 
@@ -223,56 +223,56 @@ testCheckUnaryApp :: [Test]
 testCheckUnaryApp =
   [
     testCase "checkUnaryApp {x : (-> Int Bool)}: (x 0)" $
-    run (check (M.fromList [("x",TFun TInt TBool)]) emptyUEnv (UnaryApp (Var "x") (Lit (IntV 0))))
+    run (check (M.fromList [("x",TFun TInt TBool)]) emptySubst (UnaryApp (Var "x") (Lit (IntV 0))))
     @?= (M.fromList [("x",TFun TInt TBool)],M.fromList [("a",TBool)],TBool)
 
   , testCase "checkUnaryApp: {f : (-> Bool Bool)}: (let [x true] (f x))" $
-    run (check (M.fromList [("f",TFun TBool TBool)]) emptyUEnv (Let (Var "x") (Lit (BoolV True)) (UnaryApp (Var "f") (Var "x"))))
+    run (check (M.fromList [("f",TFun TBool TBool)]) emptySubst (Let (Var "x") (Lit (BoolV True)) (UnaryApp (Var "f") (Var "x"))))
     @?= (M.fromList [("f",TFun TBool TBool)],M.fromList [("a",TBool)],TBool)
 
   , testCase "checkUnaryApp: {f : (-> Int Bool)}: ((fn [x] x) f)" $
-    run (check (M.fromList [("f",TFun TInt TBool)]) emptyUEnv (UnaryApp (Fun (Var "x") (Var "x")) (Var "f")))
+    run (check (M.fromList [("f",TFun TInt TBool)]) emptySubst (UnaryApp (Fun (Var "x") (Var "x")) (Var "f")))
     @?= (M.fromList [("f",TFun TInt TBool)],M.fromList [("a",TFun TInt TBool),("b",TFun TInt TBool)],TFun TInt TBool)
 
   , testCase "checkUnaryApp: (let [x (fn [y] y)] (x 3))" $
-    run (check emptyTEnv emptyUEnv (Let (Var "x") (Fun (Var "y") (Var "y")) (UnaryApp (Var "x") (Lit (IntV 3)))))
+    run (check emptyTEnv emptySubst (Let (Var "x") (Fun (Var "y") (Var "y")) (UnaryApp (Var "x") (Lit (IntV 3)))))
     @?= (M.fromList [],M.fromList [("a",TInt),("b",TInt)],TInt)
 
   , testCase "checkUnaryApp: (let [x (fn [y] y)] (x (x 3)))" $
-    run (check emptyTEnv emptyUEnv (Let (Var "x") (Fun (Var "y") (Var "y")) (UnaryApp (Var "x") (UnaryApp (Var "x") (Lit (IntV 3))))))
+    run (check emptyTEnv emptySubst (Let (Var "x") (Fun (Var "y") (Var "y")) (UnaryApp (Var "x") (UnaryApp (Var "x") (Lit (IntV 3))))))
     @?= (M.fromList [],M.fromList [("a",TInt),("b",TInt),("c",TInt)],TInt)
 
   , testCase "checkUnaryApp: ((fn [x] (fn [y] x)) 0)" $
-    run (check emptyTEnv emptyUEnv (UnaryApp (Fun (Var "x") (Fun (Var "y") (Var "x"))) (Lit (IntV 0))))
+    run (check emptyTEnv emptySubst (UnaryApp (Fun (Var "x") (Fun (Var "y") (Var "x"))) (Lit (IntV 0))))
     @?= (M.fromList [],M.fromList [("a",TInt),("c",TFun (TVar "b") TInt)],TFun (TVar "b") TInt)
 
   , testCase "checkUnaryApp: (((fn [x] (fn [y] x)) 0) True)" $
-    run (check emptyTEnv emptyUEnv (UnaryApp (UnaryApp (Fun (Var "x") (Fun (Var "y") (Var "x"))) (Lit (IntV 0))) (Lit (BoolV True))))
+    run (check emptyTEnv emptySubst (UnaryApp (UnaryApp (Fun (Var "x") (Fun (Var "y") (Var "x"))) (Lit (IntV 0))) (Lit (BoolV True))))
     @?= (M.fromList [],M.fromList [("a",TInt),("b",TBool),("c",TFun TBool TInt),("d",TInt)],TInt)
 
   , testCase "checkUnaryApp: ((fn [x] x 3) (fn [x] x)) : Int" $
-    run (check emptyTEnv emptyUEnv (UnaryApp (Fun (Var "x") (UnaryApp (Var "x") (Lit (IntV 3)))) (Fun (Var "x") (Var "x"))))
+    run (check emptyTEnv emptySubst (UnaryApp (Fun (Var "x") (UnaryApp (Var "x") (Lit (IntV 3)))) (Fun (Var "x") (Var "x"))))
     @?= (M.fromList [],M.fromList [("a",TFun TInt TInt),("b",TInt),("c",TInt),("d",TInt)],TInt)
 
   , testCase "checkUnaryApp: (x 0) unbound variable" $
-    expectE (check emptyTEnv emptyUEnv (UnaryApp (Var "x") (Lit (IntV 0))))
+    expectE (check emptyTEnv emptySubst (UnaryApp (Var "x") (Lit (IntV 0))))
     @?= UnboundVariable "x"
 
   , testCase "checkUnaryApp: x : Int => (x 0) type mismatch" $
-    expectE (check (M.fromList [("x",TInt)]) emptyUEnv (UnaryApp (Var "x") (Lit (IntV 0))))
+    expectE (check (M.fromList [("x",TInt)]) emptySubst (UnaryApp (Var "x") (Lit (IntV 0))))
     @?= FunctionExpected TInt
 
   -- TODO can this be type-checked with let-polymorphism?
   , testCase "checkUnaryApp: (let [x (fn [y] y)] (x x))" $
-    expectE (check emptyTEnv emptyUEnv (Let (Var "x") (Fun (Var "y") (Var "y")) (UnaryApp (Var "x") (Var "x"))))
+    expectE (check emptyTEnv emptySubst (Let (Var "x") (Fun (Var "y") (Var "y")) (UnaryApp (Var "x") (Var "x"))))
     @?= InfiniteType (TVar "a") (TFun (TVar "a") (TVar "a"))
 
   , testCase "checkUnaryApp: x : (-> Bool Int) => (x 0)" $
-    expectE (check (M.fromList [("x",TFun TBool TInt)]) emptyUEnv (UnaryApp (Var "x") (Lit (IntV 0))))
+    expectE (check (M.fromList [("x",TFun TBool TInt)]) emptySubst (UnaryApp (Var "x") (Lit (IntV 0))))
     @?= Mismatch TBool TInt
 
   , testCase "checkUnaryApp: x : (-> z z) => ((fn [y] (y 3)) x) : Int" $
-    run (check (M.fromList [("x", TFun (TVar "z") (TVar "z"))]) emptyUEnv (UnaryApp (Fun (Var "y") (UnaryApp (Var "y") (Lit (IntV 3)))) (Var "x")))
+    run (check (M.fromList [("x", TFun (TVar "z") (TVar "z"))]) emptySubst (UnaryApp (Fun (Var "y") (UnaryApp (Var "y") (Lit (IntV 3)))) (Var "x")))
     @?= (M.fromList [("x",TFun (TVar "z") (TVar "z"))],M.fromList [("a",TFun TInt TInt),("b",TInt),("c",TInt),("z",TInt)],TInt)
   ]
 
@@ -280,19 +280,19 @@ testCheckList :: [Test]
 testCheckList =
   [
     testCase "checkList: []" $
-    run (check emptyTEnv emptyUEnv (List []))
+    run (check emptyTEnv emptySubst (List []))
     @?= (M.fromList [],M.fromList [],TList (TVar "a"))
 
   , testCase "checkList: [0]" $
-    run (check emptyTEnv emptyUEnv (List [Lit (IntV 0)]))
+    run (check emptyTEnv emptySubst (List [Lit (IntV 0)]))
     @?= (M.fromList [],M.fromList [],TList TInt)
 
   , testCase "checkList: [0 ((fn [x] x) 0) 123]" $
-    run (check emptyTEnv emptyUEnv (List [Lit (IntV 0),UnaryApp (Fun (Var "x") (Var "x")) (Lit (IntV 0)), Lit (IntV 0)]))
+    run (check emptyTEnv emptySubst (List [Lit (IntV 0),UnaryApp (Fun (Var "x") (Var "x")) (Lit (IntV 0)), Lit (IntV 0)]))
     @?= (M.fromList [],M.fromList [("a",TInt),("b",TInt),("c",TInt),("d",TInt)],TList TInt)
 
   , testCase "checkList: [0 true]" $
-    expectE (check emptyTEnv emptyUEnv (List [Lit (IntV 0),Lit (BoolV True)]))
+    expectE (check emptyTEnv emptySubst (List [Lit (IntV 0),Lit (BoolV True)]))
     @?= Mismatch TInt TBool
   ]
 
@@ -300,14 +300,14 @@ testCheckIf :: [Test]
 testCheckIf =
   [
     testCase "checkIf: (if ((fn [x] true) 0) \"truth\" \"false\") : String" $
-    run (check emptyTEnv emptyUEnv (If (UnaryApp (Fun (Var "x") (Lit (BoolV True))) (Lit (IntV 0))) (Lit (StringV "then clause")) (Lit (StringV "else clause"))))
+    run (check emptyTEnv emptySubst (If (UnaryApp (Fun (Var "x") (Lit (BoolV True))) (Lit (IntV 0))) (Lit (StringV "then clause")) (Lit (StringV "else clause"))))
     @?= (M.fromList [],M.fromList [("a",TInt),("b",TBool)],TString)
 
   , testCase "checkIf: (if true (fn [x] x) (fn [y] y))" $
-    run (check emptyTEnv emptyUEnv (If (Lit (BoolV False)) (Fun (Var "x") (Var "x")) (Fun (Var "y") (Var "y"))))
+    run (check emptyTEnv emptySubst (If (Lit (BoolV False)) (Fun (Var "x") (Var "x")) (Fun (Var "y") (Var "y"))))
     @?= (M.fromList [],M.fromList [("b",TVar "a")],TFun (TVar "a") (TVar "a"))
 
   , testCase "checkIf: (if false 0 false)" $
-    expectE (check emptyTEnv emptyUEnv (If (Lit (BoolV False)) (Lit (IntV 0)) (Lit (BoolV False))))
+    expectE (check emptyTEnv emptySubst (If (Lit (BoolV False)) (Lit (IntV 0)) (Lit (BoolV False))))
     @?= Mismatch TInt TBool
   ]

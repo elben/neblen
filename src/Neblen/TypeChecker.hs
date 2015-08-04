@@ -29,14 +29,14 @@ getFresh = do
   lift $ put s{getFreshCounter = getFreshCounter s + 1}
   return $ TVar (letters !! getFreshCounter s)
 
--- Mapping of variables to its type.
+-- Mapping of variables (value vars, *not* type vars) to its type.
 type TEnv = M.Map Name Type
 
 -- Type variable.
 type TName = String
 
--- Unification tenvironment. Mapping of type variables to its type.
-type UEnv = M.Map TName Type
+-- Type variable substitutions. Mapping of type variables to its type.
+type Subst = M.Map TName Type
 
 -- Monad transformer stack for TypeCheck:
 --
@@ -53,6 +53,7 @@ data Type = TInt
           | TList Type
           | TVar TName
   deriving (Eq, Ord)
+  -- ^ Ord for Set functions.
 
 instance Show Type where
   show TInt = "Int"
@@ -97,11 +98,11 @@ initFreshCounter = FreshCounter { getFreshCounter = 0 }
 letters :: [String]
 letters = [1..] >>= flip replicateM ['a'..'z']
 
--- Something is Subsitutable if you can apply the given UEnv to it, substituting
--- type variables in 't' with its mapping in the UEnv.
+-- Something is Subsitutable if you can apply the given Subst to it, substituting
+-- type variables in 't' with its mapping in the Subst.
 class Substitutable t where
-  -- Substitute free type variables in 't' with mapping found in UEnv.
-  apply :: UEnv -> t -> t
+  -- Substitute free type variables in 't' with mapping found in Subst.
+  apply :: Subst -> t -> t
 
   -- Returns list of type variables found in 't'.
   tvars :: t -> S.Set Type
@@ -120,9 +121,9 @@ instance Substitutable a => Substitutable [a] where
 -- fromList [a,b]
 --
 instance Substitutable Type where
-  apply uenv (TVar tv) = fromMaybe (TVar tv) (lookupEnv uenv tv)
-  apply uenv (TFun a r) = TFun (apply uenv a) (apply uenv r)
-  apply uenv (TList t) = TList (apply uenv t)
+  apply s (TVar tv) = fromMaybe (TVar tv) (lookupEnv s tv)
+  apply s (TFun a r) = TFun (apply s a) (apply s r)
+  apply s (TList t) = TList (apply s t)
   apply _ t = t
 
   tvars (TVar tv) = S.singleton (TVar tv)
@@ -130,7 +131,7 @@ instance Substitutable Type where
   tvars (TList t) = tvars t
   tvars _ = S.empty
 
--- | Compose two UEnvs together: apply u1's substitutions over u2's values.
+-- | Compose two Substs together: apply u1's substitutions over u2's values.
 -- Example:
 --
 --   u1: {c -> b}
@@ -143,81 +144,81 @@ instance Substitutable Type where
 -- >>> compose (M.fromList [("c", TVar "b")]) (M.fromList [("a", TFun (TVar "b") (TVar "c"))])
 -- fromList [("a",(-> b b)),("c",b)]
 --
--- Below composes the wrong way. The resulting uenv is not useful (as the
+-- Below composes the wrong way. The resulting Subst is not useful (as the
 -- variables aren't all properly substituted).
 --
 -- >>> compose (M.fromList [("a", TFun (TVar "b") (TVar "c"))]) (M.fromList [("c", TVar "b")])
 -- fromList [("a",(-> b c)),("c",b)]
 --
-compose :: UEnv -> UEnv -> UEnv
+compose :: Subst -> Subst -> Subst
 compose u1 u2 = M.union (M.map (apply u1) u2) u1
 
--- | Compose UEnvs left-to-right. See 'compose' function for comments.
+-- | Compose Substs left-to-right. See 'compose' function for comments.
 --
 -- >>> composeAll [(M.fromList [("c", TVar "b")]), (M.fromList [("a", TFun (TVar "b") (TVar "c"))])]
 -- fromList [("a",(-> b b)),("c",b)]
 --
-composeAll :: [UEnv] -> UEnv
-composeAll = foldl compose emptyUEnv
+composeAll :: [Subst] -> Subst
+composeAll = foldl compose emptySubst
 
 -- | Unify types.
 --
--- TODO: what if this just returns the UEnv, then users "apply" (see
--- write-you-a-haskell chatper 7 poly example) the new uenv with their old
+-- TODO: what if this just returns the Subst, then users "apply" (see
+-- write-you-a-haskell chatper 7 poly example) the new subst with their old
 -- stuff. This may simplify a lot of stuff!
 --
-unify :: UEnv -> Type -> Type -> TypeCheck (UEnv, Type)
-unify uenv TInt TInt = return (uenv, TInt)
-unify uenv TBool TBool = return (uenv, TBool)
-unify uenv TString TString = return (uenv, TString)
-unify uenv (TVar tv) t2 = unifyTVar uenv (TVar tv) t2
-unify uenv t1 (TVar tv) = unifyTVar uenv (TVar tv) t1
-unify uenv (TFun a1 r1) (TFun a2 r2) = do
-  (uenv', ta) <- unify uenv a1 a2
-  (uenv'', tr) <- unify uenv' (apply uenv' r1) (apply uenv' r2)
-  -- We now have a u-env built from both argument and return types. Substitue
+unify :: Subst -> Type -> Type -> TypeCheck (Subst, Type)
+unify s TInt TInt = return (s, TInt)
+unify s TBool TBool = return (s, TBool)
+unify s TString TString = return (s, TString)
+unify s (TVar tv) t2 = unifyTVar s (TVar tv) t2
+unify s t1 (TVar tv) = unifyTVar s (TVar tv) t1
+unify s (TFun a1 r1) (TFun a2 r2) = do
+  (s', ta) <- unify s a1 a2
+  (s'', tr) <- unify s' (apply s' r1) (apply s' r2)
+  -- We now have a substitution built from both argument and return types. Substitue
   -- any remaining type variables.
-  return (composeAll [uenv'', uenv', uenv], TFun (apply uenv'' ta) (apply uenv'' tr))
+  return (composeAll [s'', s', s], TFun (apply s'' ta) (apply s'' tr))
 
 -- Assume order implies attempted function call on a non-function.
 unify _ t TFun{} = throwE (FunctionExpected t)
 unify _ t1 t2 = throwE $ Mismatch t1 t2
 
-unifyTVar :: UEnv -> Type -> Type -> TypeCheck (UEnv, Type)
-unifyTVar uenv tvar@(TVar tv) t2 =
-  case lookupEnv uenv tv of
+unifyTVar :: Subst -> Type -> Type -> TypeCheck (Subst, Type)
+unifyTVar s tvar@(TVar tv) t2 =
+  case lookupEnv s tv of
     Nothing ->
       case t2 of
         -- If both sides are free, then see if we can resolve the RHS with the
-        -- u-env. For example, in (-> a a) (-> a b) with uenv {b -> Int}, the
+        -- subst. For example, in (-> a a) (-> a b) with subst {b -> Int}, the
         -- LHS failed to resolve, so we try the RHS.
-        TVar tv2 -> case lookupEnv uenv tv2 of
+        TVar tv2 -> case lookupEnv s tv2 of
                       -- RHS is still free.
                       Nothing | tv == tv2  ->
                                   -- Same free variable. Return this free
                                   -- variable.
-                                  return (uenv, TVar tv)
+                                  return (s, TVar tv)
 
                               | occursCheck tvar t2 -> throwE $ InfiniteType (TVar tv) t2
                               | otherwise ->
                                   -- Unify free variables together.
                                   --
                                   -- Example: a <==> b
-                                  -- UEnv: {b -> a}
+                                  -- Subst: {b -> a}
                                   -- Returned: a
-                                  return (insertEnv uenv tv2 (TVar tv), TVar tv)
+                                  return (insertEnv s tv2 (TVar tv), TVar tv)
 
                       -- Resolved RHS. In the example above, b (RHS) is resolved to
-                      -- Int. So we need to update uenv to {b -> Int, a -> Int}
-                      Just t2' -> let uenv' = insertEnv uenv tv2 t2'
-                                      uenv'' = insertEnv uenv' tv t2'
-                                  in unify (composeAll [uenv'', uenv', uenv]) (TVar tv2) t2'
+                      -- Int. So we need to update s to {b -> Int, a -> Int}
+                      Just t2' -> let s' = insertEnv s tv2 t2'
+                                      s'' = insertEnv s' tv t2'
+                                  in unify (composeAll [s'', s', s]) (TVar tv2) t2'
         _      -> if occursCheck tvar t2
                   then throwE $ InfiniteType (TVar tv) t2
-                  else let uenv' = insertEnv uenv tv t2
-                       in unify (composeAll [uenv', uenv]) (TVar tv) t2
+                  else let s' = insertEnv s tv t2
+                       in unify (composeAll [s', s]) (TVar tv) t2
     Just t1 ->
-      unify uenv t1 t2
+      unify s t1 t2
 unifyTVar _ _ _ = error "bad call to unifyTVar"
 
 -- | This occurs check asserts that if we are applying a substitution of variable
@@ -244,8 +245,8 @@ occursCheck tv t = S.member tv (tvars t)
 emptyTEnv :: TEnv
 emptyTEnv = M.empty
 
-emptyUEnv :: UEnv
-emptyUEnv = M.empty
+emptySubst :: Subst
+emptySubst = M.empty
 
 lookupEnv :: TEnv -> Name -> Maybe Type
 lookupEnv tenv name = M.lookup name tenv
@@ -253,51 +254,51 @@ lookupEnv tenv name = M.lookup name tenv
 insertEnv :: TEnv -> Name -> Type -> TEnv
 insertEnv tenv name t = M.insert name t tenv
 
-check :: TEnv -> UEnv -> Exp -> TypeCheck (TEnv, UEnv, Type)
-check tenv uenv e = case e of
+check :: TEnv -> Subst -> Exp -> TypeCheck (TEnv, Subst, Type)
+check tenv s e = case e of
   Lit lit ->
     case lit of
-      IntV _ -> return (tenv, uenv, TInt)
-      BoolV _ -> return (tenv, uenv, TBool)
-      StringV _ -> return (tenv, uenv, TString)
+      IntV _ -> return (tenv, s, TInt)
+      BoolV _ -> return (tenv, s, TBool)
+      StringV _ -> return (tenv, s, TString)
 
   Var v ->
     case lookupEnv tenv v of
-      Just t  -> return (tenv, uenv, t)
+      Just t  -> return (tenv, s, t)
       Nothing -> throwE (UnboundVariable v)
 
   Let (Var v) val body -> do
-    (tenv', uenv', valT) <- check tenv uenv val
+    (tenv', s', valT) <- check tenv s val
     let tenv'' = insertEnv tenv' v valT
-    (_, uenv'', valB) <- check tenv'' uenv' body
+    (_, s'', valB) <- check tenv'' s' body
     -- Return original tenv because 'v' is no longer in scope.
-    return (tenv, composeAll [uenv'', uenv', uenv], valB)
+    return (tenv, composeAll [s'', s', s], valB)
 
   Let{} -> throwE (GenericTypeError (Just "Let binding must be a variable"))
 
   List elems ->
     case elems of
-      [] -> getFresh >>= (\tv -> return (tenv, uenv, TList tv))
+      [] -> getFresh >>= (\tv -> return (tenv, s, TList tv))
       [el] -> do
-        (_, uenv', eT) <- check tenv uenv el
-        return (tenv, composeAll [uenv', uenv], TList eT)
+        (_, s', eT) <- check tenv s el
+        return (tenv, composeAll [s', s], TList eT)
       (e1:e2:es) -> do
-        (_, uenv', e1T) <- check tenv uenv e1
-        (_, uenv'', e2T) <- check tenv uenv' e2
-        (uenv''', _) <- unify uenv'' e1T e2T
-        check tenv (composeAll [uenv''', uenv'', uenv', uenv]) (List (e2:es))
+        (_, s', e1T) <- check tenv s e1
+        (_, s'', e2T) <- check tenv s' e2
+        (s''', _) <- unify s'' e1T e2T
+        check tenv (composeAll [s''', s'', s', s]) (List (e2:es))
 
   If p t body -> do
-    (_, uenv', pT) <- check tenv uenv p
+    (_, s', pT) <- check tenv s p
     case pT of
       TBool -> do
-        (_, uenv'', tT) <- check tenv uenv' t
-        (_, uenv''', eT) <- check tenv uenv'' body
-        (uenv'''', retT) <- unify uenv''' tT eT
-        return (tenv, composeAll [uenv'''', uenv''', uenv'', uenv', uenv], retT)
+        (_, s'', tT) <- check tenv s' t
+        (_, s''', eT) <- check tenv s'' body
+        (s'''', retT) <- unify s''' tT eT
+        return (tenv, composeAll [s'''', s''', s'', s', s], retT)
       otherT -> throwE $ Mismatch TBool otherT
 
-  NullaryFun body -> check tenv uenv body
+  NullaryFun body -> check tenv s body
 
   Fun (Var v) body -> do
     -- Get fresh type variable for argument variable, and bind the arg var to this
@@ -305,22 +306,22 @@ check tenv uenv e = case e of
     tv <- getFresh
     let tenv' = insertEnv tenv v tv
     -- Check body
-    (tenv'', uenv', bodyT) <- check tenv' uenv body
+    (tenv'', s', bodyT) <- check tenv' s body
     -- May have figured out argument's type when body was checked. If not, use the
     -- fresh we got.
     let argT = fromMaybe tv (lookupEnv tenv'' v)
-    return (tenv, uenv', TFun (apply uenv' argT) (apply uenv' bodyT))
+    return (tenv, s', TFun (apply s' argT) (apply s' bodyT))
 
   Fun{} -> throwE (GenericTypeError (Just "Fun binding must be a variable"))
 
-  NullaryApp body -> check tenv uenv body
+  NullaryApp body -> check tenv s body
 
   UnaryApp fn arg -> do
-    (_, uenv', fnT) <- check tenv uenv fn
-    (_, uenv'', argT) <- check tenv uenv' arg
+    (_, s', fnT) <- check tenv s fn
+    (_, s'', argT) <- check tenv s' arg
     retT <- getFresh
-    (uenv''', _) <- unify uenv'' fnT (TFun argT retT)
-    return (tenv, uenv''', apply uenv''' retT)
+    (s''', _) <- unify s'' fnT (TFun argT retT)
+    return (tenv, s''', apply s''' retT)
 
   Def{} -> error "TODO"
   Add{} -> error "TODO"
@@ -329,11 +330,11 @@ check tenv uenv e = case e of
 -- Helpers to run the monad transformers.
 ------------------------------------------
 
-runUnify :: TypeCheck (UEnv, Type) -> Either TypeError (UEnv, Type)
+runUnify :: TypeCheck (Subst, Type) -> Either TypeError (Subst, Type)
 runUnify uc = evalState (runExceptT uc) initFreshCounter
 
-runCheck :: TEnv -> UEnv -> Exp -> (TEnv, UEnv, Type)
-runCheck tenv uenv expr =
-  case evalState (runExceptT (check tenv uenv expr)) initFreshCounter of
+runCheck :: TEnv -> Subst -> Exp -> (TEnv, Subst, Type)
+runCheck tenv s expr =
+  case evalState (runExceptT (check tenv s expr)) initFreshCounter of
     Left e -> error (show e)
     Right r -> r
