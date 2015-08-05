@@ -11,8 +11,6 @@ import Control.Monad.Trans.Class
 import Control.Monad.Trans.State
 import Control.Monad.Trans.Except
 
-import Debug.Trace
-
 -- $setup
 -- >>> :set -XOverloadedStrings
 -- >>> import qualified Data.Map.Strict as M
@@ -54,8 +52,7 @@ data Type = TInt
           | TFun Type Type
           | TList Type
           | TVar TName
-  deriving (Eq, Ord)
-  -- ^ Ord for Set functions.
+  deriving (Eq, Ord) -- Ord for Set functions
 
 instance Show Type where
   show TInt = "Int"
@@ -75,12 +72,11 @@ instance Show TypeScheme where
   show (Forall tvs t) = "∀:" ++ show tvs ++ " " ++ show t
 
 toScheme :: Type -> TypeScheme
-toScheme t = Forall [] t
+toScheme = Forall []
 
 -- TODO This is a bad method! Need to merge TypeSchemes instead.
 typeSchemeToType :: TypeScheme -> Type
 typeSchemeToType (Forall _ t) = t
-typeSchemeToType _ = error "Error!"
 
 toTName :: Type -> TName
 toTName (TVar t) = t
@@ -303,7 +299,7 @@ closeOver s t =
 -- (fromList [],fromList [("b",Int),("c",Int),("d",Bool),("e",Bool)],Int)
 --
 check :: TEnv -> Subst -> Exp -> TypeCheck (TEnv, Subst, Type)
-check tenv s e = case (trace ("tenv: " ++ show tenv ++ "\tsubst: " ++ show s) e) of
+check tenv s e = case e of
   Lit lit ->
     case lit of
       IntV _ -> return (tenv, s, TInt)
@@ -326,27 +322,27 @@ check tenv s e = case (trace ("tenv: " ++ show tenv ++ "\tsubst: " ++ show s) e)
 
   Let{} -> throwE (GenericTypeError (Just "Let binding must be a variable"))
 
-  -- List elems ->
-  --   case elems of
-  --     [] -> getFresh >>= (\tv -> return (tenv, s, toScheme $ TList tv))
-  --     [el] -> do
-  --       (_, s', eT) <- check tenv s el
-  --       return (tenv, composeAll [s', s], (TList eT))
-  --     (e1:e2:es) -> do
-  --       (_, s', e1T) <- check tenv s e1
-  --       (_, s'', e2T) <- check tenv s' e2
-  --       (s''', _) <- unify s'' e1T e2T
-  --       check tenv (composeAll [s''', s'', s', s]) (List (e2:es))
+  List elems ->
+    case elems of
+      [] -> getFresh >>= (\tv -> return (tenv, s, TList tv))
+      [el] -> do
+        (_, s', eT) <- check tenv s el
+        return (tenv, composeAll [s', s], TList eT)
+      (e1:e2:es) -> do
+        (_, s', e1T) <- check tenv s e1
+        (_, s'', e2T) <- check tenv s' e2
+        s''' <- unify s'' e1T e2T
+        check tenv (composeAll [s''', s'', s', s]) (List (e2:es))
 
-  -- If p t body -> do
-  --   (_, s', pT) <- check tenv s p
-  --   case pT of
-  --     TBool -> do
-  --       (_, s'', tT) <- check tenv s' t
-  --       (_, s''', eT) <- check tenv s'' body
-  --       (s'''', retT) <- unify s''' tT eT
-  --       return (tenv, composeAll [s'''', s''', s'', s', s], retT)
-  --     otherT -> throwE $ Mismatch TBool otherT
+  If p t el -> do
+    (_, s', pT) <- check tenv s p
+    case pT of
+      TBool -> do
+        (_, s'', tT) <- check tenv s' t
+        (_, s''', eT) <- check tenv s'' el
+        s'''' <- unify s''' tT eT
+        return (tenv, composeAll [s'''', s''', s'', s', s], apply s'''' tT)
+      otherT -> throwE $ Mismatch TBool otherT
 
   NullaryFun body -> check tenv s body
 
@@ -362,7 +358,7 @@ check tenv s e = case (trace ("tenv: " ++ show tenv ++ "\tsubst: " ++ show s) e)
     -- TODO don't do typeSchemeToType. We need a way to merge TypeSchemes
     -- together!
     --
-    return (tenv, s', (TFun (apply s' (typeSchemeToType argT)) (apply s' bodyT)))
+    return (tenv, s', TFun (apply s' (typeSchemeToType argT)) (apply s' bodyT))
 
   Fun{} -> throwE (GenericTypeError (Just "Fun binding must be a variable"))
 
@@ -382,7 +378,7 @@ check tenv s e = case (trace ("tenv: " ++ show tenv ++ "\tsubst: " ++ show s) e)
 -- | Insert fresh variables for universally-quantified types.
 --
 freshen :: TypeScheme -> TypeCheck Type
-freshen ts = freshenWithSubst emptySubst ts >>= (\a -> return $ snd a)
+freshen ts = liftM snd (freshenWithSubst emptySubst ts)
 
 -- | Insert fresh variables for universally-quantified types.
 --
@@ -390,7 +386,7 @@ freshenWithSubst :: Subst -> TypeScheme -> TypeCheck (Subst, Type)
 freshenWithSubst s (Forall ftvs (TVar tv)) =
   if tv `elem` ftvs
   then case M.lookup tv s of
-       Just ftv -> return $ (s, ftv)
+       Just ftv -> return (s, ftv)
        Nothing -> do
          ftv <- getFresh
          return (M.insert tv ftv s, ftv)
@@ -405,7 +401,7 @@ freshenWithSubst s (Forall _ t) = return (s, t)
 -- Helpers to run the monad transformers.
 ------------------------------------------
 
-runUnify :: TypeCheck (Subst, Type) -> Either TypeError (Subst, Type)
+runUnify :: TypeCheck Subst -> Either TypeError Subst
 runUnify uc = evalState (runExceptT uc) initFreshCounter
 
 runCheck :: TEnv -> Subst -> Exp -> (TEnv, Subst, Type)
