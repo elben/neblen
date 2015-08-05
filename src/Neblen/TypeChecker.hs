@@ -25,14 +25,14 @@ import Debug.Trace
 -- >>> evalState (runExceptT getFresh) (FreshCounter { getFreshCounter = 1 })
 -- Right b
 --
-getFresh :: ExceptT TypeError (State FreshCounter) Type
+getFresh :: TypeCheck Type
 getFresh = do
   s <- lift get -- Same as: ExceptT (liftM Right get)
   lift $ put s{getFreshCounter = getFreshCounter s + 1}
   return $ TVar (letters !! getFreshCounter s)
 
 -- Mapping of variables (value vars, *not* type variables) to its type.
-type TEnv = M.Map Name Type
+type TEnv = M.Map Name TypeScheme
 
 -- Type variable.
 type TName = String
@@ -69,6 +69,22 @@ instance Show Type where
 -- functions can be instantiated with different types in the same body. See
 -- Pierce 22.7 Let-Polymorphism (pg 331).
 data TypeScheme = Forall [TName] Type
+  deriving (Eq, Ord)
+
+instance Show TypeScheme where
+  show (Forall tvs t) = "∀:" ++ show tvs ++ " " ++ show t
+
+toScheme :: Type -> TypeScheme
+toScheme t = Forall [] t
+
+-- TODO This is a bad method! Need to merge TypeSchemes instead.
+typeSchemeToType :: TypeScheme -> Type
+typeSchemeToType (Forall _ t) = t
+typeSchemeToType _ = error "Error!"
+
+toTName :: Type -> TName
+toTName (TVar t) = t
+toTName _ = error "Not TVar!"
 
 data TypeError = Mismatch Type Type
                | FunctionExpected Type
@@ -100,7 +116,7 @@ initFreshCounter = FreshCounter { getFreshCounter = 0 }
 letters :: [String]
 letters = [1..] >>= flip replicateM ['a'..'z']
 
--- Something is Subsitutable if you can apply the given Subst to it, substituting
+-- Something is Substitutable if you can apply the given Subst to it, substituting
 -- type variables in 't' with its mapping in the Subst.
 class Substitutable t where
   -- Substitute free type variables in 't' with mapping found in Subst.
@@ -123,7 +139,7 @@ instance Substitutable a => Substitutable [a] where
 -- fromList [a,b]
 --
 instance Substitutable Type where
-  apply s (TVar tv) = fromMaybe (TVar tv) (lookupEnv s tv)
+  apply s (TVar tv) = fromMaybe (TVar tv) (M.lookup tv s)
   apply s (TFun a r) = TFun (apply s a) (apply s r)
   apply s (TList t) = TList (apply s t)
   apply _ t = t
@@ -132,6 +148,10 @@ instance Substitutable Type where
   tvars (TFun a r) = S.union (tvars a) (tvars r)
   tvars (TList t) = tvars t
   tvars _ = S.empty
+
+instance Substitutable TypeScheme where
+  apply s (Forall tvs t) = Forall tvs (apply s t)
+  tvars (Forall tvs _) = S.fromList (map TVar tvs)
 
 -- | Compose two Substs together: apply u1's substitutions over u2's values.
 -- Example:
@@ -169,37 +189,39 @@ composeAll = foldl compose emptySubst
 -- write-you-a-haskell chatper 7 poly example) the new subst with their old
 -- stuff. This may simplify a lot of stuff!
 --
-unify :: Subst -> Type -> Type -> TypeCheck (Subst, Type)
-unify s TInt TInt = return (s, TInt)
-unify s TBool TBool = return (s, TBool)
-unify s TString TString = return (s, TString)
+unify :: Subst -> Type -> Type -> TypeCheck Subst
+unify s TInt TInt = return emptySubst
+unify s TBool TBool = return emptySubst
+unify s TString TString = return emptySubst
 unify s (TVar tv) t2 = unifyTVar s (TVar tv) t2
 unify s t1 (TVar tv) = unifyTVar s (TVar tv) t1
 unify s (TFun a1 r1) (TFun a2 r2) = do
-  (s', ta) <- unify s a1 a2
-  (s'', tr) <- unify s' (apply s' r1) (apply s' r2)
+  s' <- unify s a1 a2
+  s'' <- unify s' (apply s' r1) (apply s' r2)
   -- We now have a substitution built from both argument and return types. Substitue
   -- any remaining type variables.
-  return (composeAll [s'', s', s], TFun (apply s'' ta) (apply s'' tr))
+  return (composeAll [s'', s', s])
 
 -- Assume order implies attempted function call on a non-function.
 unify _ t TFun{} = throwE (FunctionExpected t)
 unify _ t1 t2 = throwE $ Mismatch t1 t2
 
-unifyTVar :: Subst -> Type -> Type -> TypeCheck (Subst, Type)
+unifyTVar :: Subst -> Type -> Type -> TypeCheck Subst
 unifyTVar s tvar@(TVar tv) t2 =
-  case lookupEnv s tv of
+  case M.lookup tv s of
     Nothing ->
       case t2 of
         -- If both sides are free, then see if we can resolve the RHS with the
         -- subst. For example, in (-> a a) (-> a b) with subst {b -> Int}, the
         -- LHS failed to resolve, so we try the RHS.
-        TVar tv2 -> case lookupEnv s tv2 of
+        TVar tv2 -> case M.lookup tv2 s of
                       -- RHS is still free.
                       Nothing | tv == tv2  ->
-                                  -- Same free variable. Return this free
-                                  -- variable.
-                                  return (s, TVar tv)
+                                  -- Same free variable: a <==> a
+                                  --
+                                  -- Return existing subst, since we learned
+                                  -- nothing new.
+                                  return s
 
                               | occursCheck tvar t2 -> throwE $ InfiniteType (TVar tv) t2
                               | otherwise ->
@@ -208,16 +230,17 @@ unifyTVar s tvar@(TVar tv) t2 =
                                   -- Example: a <==> b
                                   -- Subst: {b -> a}
                                   -- Returned: a
-                                  return (insertEnv s tv2 (TVar tv), TVar tv)
+                                  --
+                                  return (M.insert tv2 (TVar tv) s)
 
                       -- Resolved RHS. In the example above, b (RHS) is resolved to
                       -- Int. So we need to update s to {b -> Int, a -> Int}
-                      Just t2' -> let s' = insertEnv s tv2 t2'
-                                      s'' = insertEnv s' tv t2'
+                      Just t2' -> let s' = M.insert tv2 t2' s
+                                      s'' = M.insert tv t2' s'
                                   in unify (composeAll [s'', s', s]) (TVar tv2) t2'
         _      -> if occursCheck tvar t2
                   then throwE $ InfiniteType (TVar tv) t2
-                  else let s' = insertEnv s tv t2
+                  else let s' = M.insert tv t2 s
                        in unify (composeAll [s', s]) (TVar tv) t2
     Just t1 ->
       unify s t1 t2
@@ -250,11 +273,16 @@ emptyTEnv = M.empty
 emptySubst :: Subst
 emptySubst = M.empty
 
-lookupEnv :: TEnv -> Name -> Maybe Type
-lookupEnv tenv name = M.lookup name tenv
+lookupTEnv :: TEnv -> Name -> Maybe TypeScheme
+lookupTEnv tenv name = M.lookup name tenv
 
-insertEnv :: TEnv -> Name -> Type -> TEnv
+insertEnv :: TEnv -> Name -> TypeScheme -> TEnv
 insertEnv tenv name t = M.insert name t tenv
+
+closeOver :: Subst -> Type -> TypeScheme
+closeOver s t =
+  let ftvs = S.difference (tvars t) (S.fromList (map TVar (M.keys s)))
+  in Forall (map toTName (S.elems ftvs)) t
 
 -- | Check type.
 --
@@ -263,18 +291,20 @@ insertEnv tenv name t = M.insert name t tenv
 --     (let [z] (id true) 0)))
 --
 -- >>> runCheck emptyTEnv emptySubst (Let (Var "id") (Fun (Var "x") (Var "x")) (Let (Var "y") (UnaryApp (Var "id") (Lit (IntV 3))) (Let (Var "z") (UnaryApp (Var "id") (Lit (BoolV True))) (Lit (IntV 0)))))
--- error!
 --
-check :: TEnv -> Subst -> Exp -> TypeCheck (TEnv, Subst, Type)
+--
+-- >>> runCheck emptyTEnv emptySubst (Let (Var "id") (Fun (Var "x") (Var "x")) (Let (Var "y") (UnaryApp (Var "id") (Lit (IntV 3))) (Let (Var "z") (UnaryApp (Var "id") (Lit (BoolV True))) (Let (Var "o") (UnaryApp (Var "id") (Lit (StringV "hello"))) (Lit (IntV 0))))))
+--
+check :: TEnv -> Subst -> Exp -> TypeCheck (TEnv, Subst, TypeScheme)
 check tenv s e = case (trace ("tenv: " ++ show tenv ++ "\tsubst: " ++ show s) e) of
   Lit lit ->
     case lit of
-      IntV _ -> return (tenv, s, TInt)
-      BoolV _ -> return (tenv, s, TBool)
-      StringV _ -> return (tenv, s, TString)
+      IntV _ -> return (tenv, s, toScheme TInt)
+      BoolV _ -> return (tenv, s, toScheme TBool)
+      StringV _ -> return (tenv, s, toScheme TString)
 
   Var v ->
-    case lookupEnv tenv v of
+    case lookupTEnv tenv v of
       Just t  -> return (tenv, s, t)
       Nothing -> throwE (UnboundVariable v)
 
@@ -287,27 +317,27 @@ check tenv s e = case (trace ("tenv: " ++ show tenv ++ "\tsubst: " ++ show s) e)
 
   Let{} -> throwE (GenericTypeError (Just "Let binding must be a variable"))
 
-  List elems ->
-    case elems of
-      [] -> getFresh >>= (\tv -> return (tenv, s, TList tv))
-      [el] -> do
-        (_, s', eT) <- check tenv s el
-        return (tenv, composeAll [s', s], TList eT)
-      (e1:e2:es) -> do
-        (_, s', e1T) <- check tenv s e1
-        (_, s'', e2T) <- check tenv s' e2
-        (s''', _) <- unify s'' e1T e2T
-        check tenv (composeAll [s''', s'', s', s]) (List (e2:es))
+  -- List elems ->
+  --   case elems of
+  --     [] -> getFresh >>= (\tv -> return (tenv, s, toScheme $ TList tv))
+  --     [el] -> do
+  --       (_, s', eT) <- check tenv s el
+  --       return (tenv, composeAll [s', s], closeOver s' (TList eT))
+  --     (e1:e2:es) -> do
+  --       (_, s', e1T) <- check tenv s e1
+  --       (_, s'', e2T) <- check tenv s' e2
+  --       (s''', _) <- unify s'' e1T e2T
+  --       check tenv (composeAll [s''', s'', s', s]) (List (e2:es))
 
-  If p t body -> do
-    (_, s', pT) <- check tenv s p
-    case pT of
-      TBool -> do
-        (_, s'', tT) <- check tenv s' t
-        (_, s''', eT) <- check tenv s'' body
-        (s'''', retT) <- unify s''' tT eT
-        return (tenv, composeAll [s'''', s''', s'', s', s], retT)
-      otherT -> throwE $ Mismatch TBool otherT
+  -- If p t body -> do
+  --   (_, s', pT) <- check tenv s p
+  --   case pT of
+  --     TBool -> do
+  --       (_, s'', tT) <- check tenv s' t
+  --       (_, s''', eT) <- check tenv s'' body
+  --       (s'''', retT) <- unify s''' tT eT
+  --       return (tenv, composeAll [s'''', s''', s'', s', s], retT)
+  --     otherT -> throwE $ Mismatch TBool otherT
 
   NullaryFun body -> check tenv s body
 
@@ -315,13 +345,19 @@ check tenv s e = case (trace ("tenv: " ++ show tenv ++ "\tsubst: " ++ show s) e)
     -- Get fresh type variable for argument variable, and bind the arg var to this
     -- type var.
     tv <- getFresh
-    let tenv' = insertEnv tenv v tv
+    let tenv' = insertEnv tenv v (closeOver s tv)
     -- Check body
     (tenv'', s', bodyT) <- check tenv' s body
     -- May have figured out argument's type when body was checked. If not, use the
     -- fresh we got.
-    let argT = fromMaybe tv (lookupEnv tenv'' v)
-    return (tenv, s', TFun (apply s' argT) (apply s' bodyT))
+    let argT = fromMaybe (closeOver s' tv) (lookupTEnv tenv'' v)
+    -- TODO don't do typeSchemeToType. We need a way to merge TypeSchemes
+    -- together as we close over them!
+    --
+    -- let ts1 = closeOver s' argT
+    -- let ts2 = closeOver s' argT
+    --
+    return (tenv, s', closeOver s' (TFun (apply s' (typeSchemeToType argT)) (apply s' (typeSchemeToType bodyT))))
 
   Fun{} -> throwE (GenericTypeError (Just "Fun binding must be a variable"))
 
@@ -331,11 +367,37 @@ check tenv s e = case (trace ("tenv: " ++ show tenv ++ "\tsubst: " ++ show s) e)
     (_, s', fnT) <- check tenv s fn
     (_, s'', argT) <- check tenv s' arg
     retT <- getFresh
-    (s''', _) <- unify s'' fnT (TFun argT retT)
-    return (tenv, s''', apply s''' retT)
+
+    fnT' <- freshen fnT
+    argT' <- freshen argT
+
+    s''' <- unify s'' fnT' (TFun argT' retT)
+    return (tenv, composeAll [s''', s'', s', s], apply s''' (closeOver s retT))
 
   Def{} -> error "TODO"
   Add{} -> error "TODO"
+
+-- | Insert fresh variables for universally-quantified types.
+--
+freshen :: TypeScheme -> TypeCheck Type
+freshen ts = freshenWithSubst emptySubst ts >>= (\a -> return $ snd a)
+
+-- | Insert fresh variables for universally-quantified types.
+--
+freshenWithSubst :: Subst -> TypeScheme -> TypeCheck (Subst, Type)
+freshenWithSubst s (Forall ftvs (TVar tv)) =
+  if tv `elem` ftvs
+  then case M.lookup tv s of
+       Just ftv -> return $ (s, ftv)
+       Nothing -> do
+         ftv <- getFresh
+         return (M.insert tv ftv s, ftv)
+  else return (s, TVar tv)
+freshenWithSubst s (Forall ftvs (TFun a r)) = do
+  (s1, a1) <- freshenWithSubst s (Forall ftvs a)
+  (s1, r1) <- freshenWithSubst s1 (Forall ftvs r)
+  return (s1, TFun a1 r1)
+freshenWithSubst s (Forall ftvs t) = return (s, t)
 
 ------------------------------------------
 -- Helpers to run the monad transformers.
@@ -344,7 +406,7 @@ check tenv s e = case (trace ("tenv: " ++ show tenv ++ "\tsubst: " ++ show s) e)
 runUnify :: TypeCheck (Subst, Type) -> Either TypeError (Subst, Type)
 runUnify uc = evalState (runExceptT uc) initFreshCounter
 
-runCheck :: TEnv -> Subst -> Exp -> (TEnv, Subst, Type)
+runCheck :: TEnv -> Subst -> Exp -> (TEnv, Subst, TypeScheme)
 runCheck tenv s expr =
   case evalState (runExceptT (check tenv s expr)) initFreshCounter of
     Left e -> error (show e)
