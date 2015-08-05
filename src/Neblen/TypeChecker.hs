@@ -181,68 +181,28 @@ composeAll = foldl compose emptySubst
 
 -- | Unify types.
 --
--- TODO: what if this just returns the Subst, then users "apply" (see
--- write-you-a-haskell chatper 7 poly example) the new subst with their old
--- stuff. This may simplify a lot of stuff!
---
--- TODO don't need to pass in Subst. Somehow this works.
---
-unify :: Subst -> Type -> Type -> TypeCheck Subst
-unify _ TInt TInt = return emptySubst
-unify _ TBool TBool = return emptySubst
-unify _ TString TString = return emptySubst
-unify s (TVar tv) t2 = unifyTVar s (TVar tv) t2
-unify s t1 (TVar tv) = unifyTVar s (TVar tv) t1
-unify s (TFun a1 r1) (TFun a2 r2) = do
-  s' <- unify s a1 a2
-  s'' <- unify s' (apply s' r1) (apply s' r2)
+unify :: Type -> Type -> TypeCheck Subst
+unify TInt TInt = return emptySubst
+unify TBool TBool = return emptySubst
+unify TString TString = return emptySubst
+unify (TVar tv) t2 = unifyTVar (TVar tv) t2
+unify t1 (TVar tv) = unifyTVar (TVar tv) t1
+unify (TFun a1 r1) (TFun a2 r2) = do
+  s' <- unify a1 a2
+  s'' <- unify (apply s' r1) (apply s' r2)
   -- We now have a substitution built from both argument and return types. Substitue
   -- any remaining type variables.
-  return (composeAll [s'', s', s])
+  return (composeAll [s'', s'])
 
 -- Assume order implies attempted function call on a non-function.
-unify _ t TFun{} = throwE (FunctionExpected t)
-unify _ t1 t2 = throwE $ Mismatch t1 t2
+unify t TFun{} = throwE (FunctionExpected t)
+unify t1 t2 = throwE $ Mismatch t1 t2
 
--- TODO don't need to pass in Subst. Somehow this works.
-unifyTVar :: Subst -> Type -> Type -> TypeCheck Subst
-unifyTVar s tvar@(TVar tv) t2 =
-  case M.lookup tv s of
-    Nothing ->
-      case t2 of
-        -- If both sides are free, then see if we can resolve the RHS with the
-        -- subst. For example, in (-> a a) (-> a b) with subst {b -> Int}, the
-        -- LHS failed to resolve, so we try the RHS.
-        TVar tv2 -> case M.lookup tv2 s of
-                      -- RHS is still free.
-                      Nothing | tv == tv2  ->
-                                  -- Same free variable: a <==> a
-                                  --
-                                  -- Return existing subst, since we learned
-                                  -- nothing new.
-                                  return s
-
-                              | occursCheck tvar t2 -> throwE $ InfiniteType (TVar tv) t2
-                              | otherwise ->
-                                  -- Unify free variables together.
-                                  --
-                                  -- Example: a <==> b
-                                  -- Subst: {b -> a}
-                                  -- Returned: a
-                                  --
-                                  return (M.insert tv2 (TVar tv) s)
-
-                      -- Resolved RHS. In the example above, b (RHS) is resolved to
-                      -- Int. So we need to update s to {b -> Int, a -> Int}
-                      Just t2' -> let s' = M.insert tv2 t2' s
-                                      s'' = M.insert tv t2' s'
-                                  in unify (composeAll [s'', s', s]) (TVar tv2) t2'
-        _      -> if occursCheck tvar t2
-                  then throwE $ InfiniteType (TVar tv) t2
-                  else return $ M.insert tv t2 s
-    Just t1 ->
-      unify s t1 t2
-unifyTVar _ _ _ = error "bad call to unifyTVar"
+unifyTVar :: Type -> Type -> TypeCheck Subst
+unifyTVar t1@(TVar tv) t2 | t1 == t2 = return emptySubst
+                          | occursCheck t1 t2 = throwE $ InfiniteType t1 t2
+                          | otherwise = return (M.singleton tv t2)
+unifyTVar _ _ = error "Bad call to unifyTVar"
 
 -- | This occurs check asserts that if we are applying a substitution of variable
 -- x to an expression e, the variable x cannot be free in e. Otherwise the
@@ -274,8 +234,8 @@ emptySubst = M.empty
 lookupTEnv :: TEnv -> Name -> Maybe TypeScheme
 lookupTEnv tenv name = M.lookup name tenv
 
-insertEnv :: TEnv -> Name -> TypeScheme -> TEnv
-insertEnv tenv name t = M.insert name t tenv
+insertTEnv :: TEnv -> Name -> TypeScheme -> TEnv
+insertTEnv tenv name t = M.insert name t tenv
 
 -- | Close over unbounded type variables.
 --
@@ -309,13 +269,13 @@ check tenv s e = case e of
   Var v ->
     case lookupTEnv tenv v of
       Just t  -> do
-        t' <- freshen t
+        t' <- freshen (apply s t)
         return (tenv, s, t')
       Nothing -> throwE (UnboundVariable v)
 
   Let (Var v) val body -> do
     (tenv', s', valT) <- check tenv s val
-    let tenv'' = insertEnv tenv' v (closeOver s' valT) -- let-polymorphism
+    let tenv'' = insertTEnv tenv' v (closeOver s' valT) -- let-polymorphism
     (_, s'', valB) <- check tenv'' s' body
     -- Return original tenv because 'v' is no longer in scope.
     return (tenv, composeAll [s'', s', s], valB)
@@ -326,13 +286,13 @@ check tenv s e = case e of
     case elems of
       [] -> getFresh >>= (\tv -> return (tenv, s, TList tv))
       [el] -> do
-        (_, s', eT) <- check tenv s el
-        return (tenv, composeAll [s', s], TList eT)
+        (_, s1, eT) <- check tenv s el
+        return (tenv, composeAll [s1, s], TList (apply s1 eT))
       (e1:e2:es) -> do
-        (_, s', e1T) <- check tenv s e1
-        (_, s'', e2T) <- check tenv s' e2
-        s''' <- unify s'' e1T e2T
-        check tenv (composeAll [s''', s'', s', s]) (List (e2:es))
+        (_, s1, e1T) <- check tenv s e1
+        (_, s2, e2T) <- check tenv s1 e2
+        s3 <- unify (apply s2 e1T) (apply s2 e2T)
+        check tenv (composeAll [s3, s2, s1, s]) (List (e2:es))
 
   If p t el -> do
     (_, s', pT) <- check tenv s p
@@ -340,7 +300,7 @@ check tenv s e = case e of
       TBool -> do
         (_, s'', tT) <- check tenv s' t
         (_, s''', eT) <- check tenv s'' el
-        s'''' <- unify s''' tT eT
+        s'''' <- unify tT eT
         return (tenv, composeAll [s'''', s''', s'', s', s], apply s'''' tT)
       otherT -> throwE $ Mismatch TBool otherT
 
@@ -350,27 +310,29 @@ check tenv s e = case e of
     -- Get fresh type variable for argument variable, and bind the arg var to this
     -- type var.
     tv <- getFresh
-    let tenv' = insertEnv tenv v (toScheme tv)
+    let tenv' = insertTEnv tenv v (toScheme tv)
     (tenv'', s', bodyT) <- check tenv' s body
     -- May have figured out argument's type when body was checked. If not, use the
     -- fresh we got.
-    let argT = fromMaybe (toScheme tv) (lookupTEnv tenv'' v)
+    -- let argT = fromMaybe (toScheme tv) (lookupTEnv tenv'' v)
     -- TODO don't do typeSchemeToType. We need a way to merge TypeSchemes
     -- together!
     --
-    return (tenv, s', TFun (apply s' (typeSchemeToType argT)) (apply s' bodyT))
+    -- return (tenv, s', TFun (apply s' (typeSchemeToType argT)) bodyT)
+    -- return (tenv, s', TFun (apply s' tv) (apply s' bodyT))
+    return (tenv, s', TFun (apply s' tv) bodyT)
 
   Fun{} -> throwE (GenericTypeError (Just "Fun binding must be a variable"))
 
   NullaryApp body -> check tenv s body
 
   UnaryApp fn arg -> do
-    (_, s', fnT) <- check tenv s fn
-    (_, s'', argT) <- check tenv s' arg
+    (_, s1, fnT) <- check tenv s fn
+    (_, s2, argT) <- check tenv s1 arg
     retT <- getFresh
 
-    s''' <- unify s'' fnT (TFun argT retT)
-    return (tenv, composeAll [s''', s'', s', s], apply s''' retT)
+    s3 <- unify (apply s2 fnT) (apply s2 (TFun argT retT))
+    return (tenv, composeAll [s3, s2, s1, s], apply s3 retT)
 
   Def{} -> error "TODO"
   Add{} -> error "TODO"
