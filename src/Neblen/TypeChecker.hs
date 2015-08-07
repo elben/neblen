@@ -256,52 +256,52 @@ closeOver s t =
 --     (let [z] (id true) 0)))
 --
 -- >>> runCheck emptyTEnv emptySubst (Let (Var "id") (Fun (Var "x") (Var "x")) (Let (Var "y") (UnaryApp (Var "id") (Lit (IntV 3))) (Let (Var "z") (UnaryApp (Var "id") (Lit (BoolV True))) (Lit (IntV 0)))))
--- (fromList [],fromList [("b",Int),("c",Int),("d",Bool),("e",Bool)],Int)
+-- (fromList [("b",Int),("c",Int),("d",Bool),("e",Bool)],Int)
 --
-check :: TEnv -> Subst -> Exp -> TypeCheck (TEnv, Subst, Type)
+check :: TEnv -> Subst -> Exp -> TypeCheck (Subst, Type)
 check tenv s e = case e of
   Lit lit ->
     case lit of
-      IntV _ -> return (tenv, s, TInt)
-      BoolV _ -> return (tenv, s, TBool)
-      StringV _ -> return (tenv, s, TString)
+      IntV _ -> return (s, TInt)
+      BoolV _ -> return (s, TBool)
+      StringV _ -> return (s, TString)
 
   Var v ->
     case lookupTEnv tenv v of
       Just t  -> do
         t' <- freshen (apply s t)
-        return (tenv, s, t')
+        return (s, t')
       Nothing -> throwE (UnboundVariable v)
 
   Let (Var v) val body -> do
-    (tenv', s', valT) <- check tenv s val
-    let tenv'' = insertTEnv tenv' v (closeOver s' valT) -- let-polymorphism
-    (_, s'', valB) <- check tenv'' s' body
+    (s', valT) <- check tenv s val
+    let tenv' = insertTEnv tenv v (closeOver s' valT) -- let-polymorphism
+    (s'', valB) <- check tenv' s' body
     -- Return original tenv because 'v' is no longer in scope.
-    return (tenv, composeAll [s'', s', s], valB)
+    return (composeAll [s'', s', s], valB)
 
   Let{} -> throwE (GenericTypeError (Just "Let binding must be a variable"))
 
   List elems ->
     case elems of
-      [] -> getFresh >>= (\tv -> return (tenv, s, TList tv))
+      [] -> getFresh >>= (\tv -> return (s, TList tv))
       [el] -> do
-        (_, s1, eT) <- check tenv s el
-        return (tenv, composeAll [s1, s], TList (apply s1 eT))
+        (s1, eT) <- check tenv s el
+        return (composeAll [s1, s], TList (apply s1 eT))
       (e1:e2:es) -> do
-        (_, s1, e1T) <- check tenv s e1
-        (_, s2, e2T) <- check tenv s1 e2
+        (s1, e1T) <- check tenv s e1
+        (s2, e2T) <- check tenv s1 e2
         s3 <- unify (apply s2 e1T) (apply s2 e2T)
         check tenv (composeAll [s3, s2, s1, s]) (List (e2:es))
 
   If p t el -> do
-    (_, s', pT) <- check tenv s p
+    (s', pT) <- check tenv s p
     case pT of
       TBool -> do
-        (_, s'', tT) <- check tenv s' t
-        (_, s''', eT) <- check tenv s'' el
+        (s'', tT) <- check tenv s' t
+        (s''', eT) <- check tenv s'' el
         s'''' <- unify tT eT
-        return (tenv, composeAll [s'''', s''', s'', s', s], apply s'''' tT)
+        return (composeAll [s'''', s''', s'', s', s], apply s'''' tT)
       otherT -> throwE $ Mismatch TBool otherT
 
   NullaryFun body -> check tenv s body
@@ -311,28 +311,22 @@ check tenv s e = case e of
     -- type var.
     tv <- getFresh
     let tenv' = insertTEnv tenv v (toScheme tv)
-    (tenv'', s', bodyT) <- check tenv' s body
+    (s', bodyT) <- check tenv' s body
     -- May have figured out argument's type when body was checked. If not, use the
     -- fresh we got.
-    -- let argT = fromMaybe (toScheme tv) (lookupTEnv tenv'' v)
-    -- TODO don't do typeSchemeToType. We need a way to merge TypeSchemes
-    -- together!
-    --
-    -- return (tenv, s', TFun (apply s' (typeSchemeToType argT)) bodyT)
-    -- return (tenv, s', TFun (apply s' tv) (apply s' bodyT))
-    return (tenv, s', TFun (apply s' tv) bodyT)
+    return (s', TFun (apply s' tv) bodyT)
 
   Fun{} -> throwE (GenericTypeError (Just "Fun binding must be a variable"))
 
   NullaryApp body -> check tenv s body
 
   UnaryApp fn arg -> do
-    (_, s1, fnT) <- check tenv s fn
-    (_, s2, argT) <- check tenv s1 arg
+    (s1, fnT) <- check tenv s fn
+    (s2, argT) <- check tenv s1 arg
     retT <- getFresh
 
     s3 <- unify (apply s2 fnT) (apply s2 (TFun argT retT))
-    return (tenv, composeAll [s3, s2, s1, s], apply s3 retT)
+    return (composeAll [s3, s2, s1, s], apply s3 retT)
 
   Def{} -> error "TODO"
   Add{} -> error "TODO"
@@ -366,7 +360,7 @@ freshenWithSubst s (Forall _ t) = return (s, t)
 runUnify :: TypeCheck Subst -> Either TypeError Subst
 runUnify uc = evalState (runExceptT uc) initFreshCounter
 
-runCheck :: TEnv -> Subst -> Exp -> (TEnv, Subst, Type)
+runCheck :: TEnv -> Subst -> Exp -> (Subst, Type)
 runCheck tenv s expr =
   case evalState (runExceptT (check tenv s expr)) initFreshCounter of
     Left e -> error (show e)
