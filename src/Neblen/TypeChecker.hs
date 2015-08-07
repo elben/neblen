@@ -2,6 +2,73 @@
 
 module Neblen.TypeChecker where
 
+-- = How the type checker works
+--
+-- At a high level, the type checker is similar to an interpreter: you go
+-- through the expression tree and calculate a type for each expression.
+--
+-- The environment of the type check includes the variable context and the type
+-- variable context:
+--
+--   * 'TEnv' - The mapping of regular variables to its type.
+--   * 'Subst' - Short for "substitution," this maps /type/ variables to its
+--     type (which may be other type variables).
+--
+-- As the checker traverses the expression, only the @Subst@ context needs to be
+-- threaded in-and-out. That is, a child expression may discover something about
+-- a type that the parent expression needs to know about. For example:
+--
+--   @
+--     (fn [x] (x true))
+--   @
+--
+-- When checking this expression, we encounter the function and give @x@ the
+-- fresh type variable @a@.
+--
+-- Then we go into the body of the function, @(x true)@, and discover that @x :
+-- a@ must be a function @(-> Bool b)@. This is in the 'Subst' context inside of
+-- @(x true)@. Finally, we pop back up to the top expression, and 'apply' this
+-- new knowledge back into the original @a@, and substitute @a@ with @(-> Bool
+-- b)@.
+--
+-- == Unification
+--
+-- == Type schemes and polymorphism
+--
+-- The 'TEnv' data type actually maps to a 'TypeScheme'. Type schemes help us
+-- deal with polymorphic types, especially in let-polymoprhism. For example:
+--
+--   @
+--     (let [id (fn [x] x)
+--           u (id 3)
+--           v (id true)]
+--       ...)
+--   @
+--
+-- In this example, the function @id@ should work for both @u@ and @v@, even
+-- though @id@ is instantiated twice with different types. To do this, we need
+-- @id@ to be typed as @id : ∀a. (-> a a)@. When the type checker reaches the
+-- @u@ binding, it should instantiate new type variables for @id@ (say it
+-- chooses the type variable @b@). Then the function application @(id 3)@ is
+-- type-checked, we get that instance of @id : (-> Int Int)@. When we
+-- check @v@, we get a /new/ @id : (-> Bool Bool)@.
+--
+-- To simplify our code, we allow type schemes over types without any free type
+-- variables: @∀. Int@.
+--
+-- == The TypeCheck data type
+--
+-- During our type checking run, we need some stuff:
+--
+--   * A way to exit the computation if a type error is encountered.
+--   * A way to fresh (guaranteed to be unused) type variables (essentially,
+--     some stateful counter).
+--   * Carry around other contexts like 'Subst'
+--
+-- To facilitate this, we use a monad transformer stack of 'ExceptT' + 'State'.
+-- 'ExceptT' gives us type errors (left) and no type error (right). 'State'
+-- gives us an incrementable counter to get fresh type variables from.
+
 import Neblen.Data
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe)
