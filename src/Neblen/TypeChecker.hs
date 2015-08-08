@@ -274,6 +274,19 @@ generalize tenv s t =
       ftv = (ftvs t `S.difference` S.fromList (map TVar (M.keys s)) `S.difference` bounds)
   in Forall (map toTName (S.elems ftv)) t
 
+-- | Check type and re-order type variables.
+--
+-- (fn [f] (fn [x] (f x))) : (-> (-> a b) (-> a b))
+-- >>> runWithFreshCounter (checkType emptyTEnv emptySubst (Fun (Var "f") (Fun (Var "x") (UnaryApp (Var "f") (Var "x")))))
+-- Right (-> (-> a b) (-> a b))
+--
+checkType :: TEnv -> Subst -> Exp -> TypeCheck Type
+checkType tenv s e = do
+  (_, t) <- check tenv s e
+  case evalState (runExceptT (reorderTVars t)) initFreshCounter of
+    Right t' -> return t'
+    Left err -> throwE err
+
 -- | Check type.
 --
 -- Below is:
@@ -371,6 +384,9 @@ check tenv s e = case e of
 --
 -- >>> runWithFreshCounter $ reorderTVars (TFun (TVar "c") (TFun (TList (TVar "c")) (TVar "a")))
 -- Right (-> a (-> [a] b))
+--
+-- >>> runWithFreshCounter $ reorderTVars (TFun (TFun (TVar "b") (TVar "c")) (TFun (TVar "b") (TVar "c")))
+-- Right (-> (-> a b) (-> a b))
 --
 reorderTVars :: Type -> TypeCheck Type
 reorderTVars t = liftM snd (freshenWithSubst emptySubst (generalize emptyTEnv emptySubst t))
