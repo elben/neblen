@@ -19,7 +19,7 @@ tests = testGroup "Neblen.TypeChecker.Tests" $ concat
     , testCheckVar
     , testCheckLet
     , testCheckNullFun
-    , testcheckFun
+    , testCheckFun
     , testCheckNullApp
     , testCheckUnaryApp
     , testCheckList
@@ -135,6 +135,11 @@ testCheckLet =
     run (check (M.fromList [("b",toScheme TBool)]) emptySubst (Let (Var "x") (Lit (IntV 0)) (Var "b")))
     @?= (M.fromList [],TBool)
 
+    -- let-polymorphism should look up existing type of 'f' when infering 'g'.
+  , testCase "checkLet let-polymorphism: ((fn [f] (let [g f] (g 0))) (fn [x] true))" $
+    run (check emptyTEnv emptySubst (UnaryApp (Fun (Var "f") (Let (Var "g") (Var "f") (UnaryApp (Var "g") (Lit (IntV 0))))) (Fun (Var "x") (Lit (BoolV True)))))
+    @?= (M.fromList [("a",TFun TInt TBool),("b",TBool),("c",TInt),("d",TBool)],TBool)
+
   , testCase "checkLet id let-polymorphism: (let [id (fn [x] x), y (id 3), z (id true)] z)" $
     run (check emptyTEnv emptySubst (Let (Var "id") (Fun (Var "x") (Var "x")) (Let (Var "y") (UnaryApp (Var "id") (Lit (IntV 3))) (Let (Var "z") (UnaryApp (Var "id") (Lit (BoolV True))) (Var "z")))))
     @?= (M.fromList [("b",TInt),("c",TInt),("d",TBool),("e",TBool)],TBool)
@@ -146,6 +151,12 @@ testCheckLet =
   , testCase "checkLet let-polymorphism: (let [twice (fn [f x] (f (f x))), a (twice (fn [x] 10) true)] a)" $
     expectE (check emptyTEnv emptySubst (Let (Var "twice") (Fun (Var "f") (Fun (Var "x") (UnaryApp (Var "f") (UnaryApp (Var "f") (Var "x"))))) (Let (Var "a") (UnaryApp (UnaryApp (Var "twice") (Fun (Var "x") (Lit (IntV 10)))) (Lit (IntV 1))) (Let (Var "b") (UnaryApp (UnaryApp (Var "twice") (Fun (Var "x") (Lit (BoolV True)))) (Lit (IntV 10))) (Var "a")))))
     @?= Mismatch TBool TInt
+
+    -- Checks that let-polymorphism doesn't generalize variables that are bound.
+    -- Pierce pg 334.
+  , testCase "checkLet let-polymorphism: ((fn [f] (let [g f] (g 0))) (fn [x] (if x x x)))" $
+    expectE (check emptyTEnv emptySubst (UnaryApp (Fun (Var "f") (Let (Var "g") (Var "f") (UnaryApp (Var "g") (Lit (IntV 0))))) (Fun (Var "x") (If (Var "x") (Var "x") (Var "x")))))
+    @?= Mismatch TBool (TVar "c")
 
   , testCase "checkLet: x" $
     expectE (check emptyTEnv emptySubst (Var "x"))
@@ -164,8 +175,8 @@ testCheckNullFun =
     @?= UnboundVariable "x"
   ]
 
-testcheckFun :: [Test]
-testcheckFun =
+testCheckFun :: [Test]
+testCheckFun =
   [
     testCase "checkFun: (fn [x] (fn [y] 0)) : (-> a (-> b Int))" $
     run (check emptyTEnv emptySubst (Fun (Var "x") (Fun (Var "y") (Lit (IntV 0)))))

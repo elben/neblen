@@ -2,6 +2,15 @@
 
 module Neblen.TypeChecker where
 
+import Neblen.Data
+import qualified Data.Map.Strict as M
+import Data.Maybe (fromMaybe)
+import qualified Data.Set as S
+import Control.Monad
+import Control.Monad.Trans.Class
+import Control.Monad.Trans.State
+import Control.Monad.Trans.Except
+
 -- = How the type checker works
 --
 -- At a high level, the type checker is similar to an interpreter: you go
@@ -69,32 +78,21 @@ module Neblen.TypeChecker where
 -- 'ExceptT' gives us type errors (left) and no type error (right). 'State'
 -- gives us an incrementable counter to get fresh type variables from.
 
-import Neblen.Data
-import qualified Data.Map.Strict as M
-import Data.Maybe (fromMaybe)
-import qualified Data.Set as S
-import Control.Monad
-import Control.Monad.Trans.Class
-import Control.Monad.Trans.State
-import Control.Monad.Trans.Except
-
 -- $setup
 -- >>> :set -XOverloadedStrings
 -- >>> import qualified Data.Map.Strict as M
 
--- | Get fresh variable.
+------------------------------------------
+-- Data types
+------------------------------------------
+
+-- Monad transformer stack for TypeCheck:
 --
--- >>> evalState (runExceptT getFresh) initFreshCounter
--- Right a
+--   State (fresh variable counter)
+--     ExceptT (TypeError)
+--       a
 --
--- >>> evalState (runExceptT getFresh) (FreshCounter { getFreshCounter = 1 })
--- Right b
---
-getFresh :: TypeCheck Type
-getFresh = do
-  s <- lift get -- Same as: ExceptT (liftM Right get)
-  lift $ put s{getFreshCounter = getFreshCounter s + 1}
-  return $ TVar (letters !! getFreshCounter s)
+type TypeCheck a = ExceptT TypeError (State FreshCounter) a
 
 -- Mapping of variables (value vars, *not* type variables) to its type.
 type TEnv = M.Map Name TypeScheme
@@ -105,14 +103,6 @@ type TName = String
 -- Type variable substitutions. Mapping of type variables to its type.
 type Subst = M.Map TName Type
 
--- Monad transformer stack for TypeCheck:
---
---   State (fresh variable counter)
---     ExceptT (TypeError)
---       a
---
-type TypeCheck a = ExceptT TypeError (State FreshCounter) a
-
 data Type = TInt
           | TBool
           | TString
@@ -121,33 +111,11 @@ data Type = TInt
           | TVar TName
   deriving (Eq, Ord) -- Ord for Set functions
 
-instance Show Type where
-  show TInt = "Int"
-  show TBool = "Bool"
-  show TString = "String"
-  show (TFun a r) = "(-> " ++ show a ++ " " ++ show r ++ ")"
-  show (TList a) = "List " ++ show a
-  show (TVar n) = n
-
 -- Type schemes is a way to allow let-polymorphism (ML-style polymorphism):
 -- functions can be instantiated with different types in the same body. See
 -- Pierce 22.7 Let-Polymorphism (pg 331).
 data TypeScheme = Forall [TName] Type
   deriving (Eq, Ord)
-
-instance Show TypeScheme where
-  show (Forall tvs t) = "∀:" ++ show tvs ++ " " ++ show t
-
-toScheme :: Type -> TypeScheme
-toScheme = Forall []
-
--- TODO This is a bad method! Need to merge TypeSchemes instead.
-typeSchemeToType :: TypeScheme -> Type
-typeSchemeToType (Forall _ t) = t
-
-toTName :: Type -> TName
-toTName (TVar t) = t
-toTName _ = error "Not TVar!"
 
 data TypeError = Mismatch Type Type
                | FunctionExpected Type
@@ -156,28 +124,7 @@ data TypeError = Mismatch Type Type
                | GenericTypeError (Maybe String)
   deriving (Eq)
 
-
-emptyGenericTypeError :: TypeError
-emptyGenericTypeError = GenericTypeError Nothing
-
-genericTypeError :: String -> TypeError
-genericTypeError msg = GenericTypeError (Just msg)
-
-instance Show TypeError where
-  show (Mismatch t1 t2) = "type mismatch: expecting " ++ show t1 ++ " but got " ++ show t2
-  show (FunctionExpected t) = "type mismatch: expecting function but got " ++ show t
-  show (UnboundVariable n) = "unbound variable " ++ n
-  show (InfiniteType tvar t) = "cannot resolve infinite type " ++ show tvar ++ " in " ++ show t
-  show (GenericTypeError (Just msg)) = "type error: " ++ msg
-  show (GenericTypeError Nothing) = "type error"
-
 newtype FreshCounter = FreshCounter { getFreshCounter :: Int }
-
-initFreshCounter :: FreshCounter
-initFreshCounter = FreshCounter { getFreshCounter = 0 }
-
-letters :: [String]
-letters = [1..] >>= flip replicateM ['a'..'z']
 
 -- Something is Substitutable if you can apply the given Subst to it, substituting
 -- type variables in 't' with its mapping in the Subst.
@@ -185,20 +132,20 @@ class Substitutable t where
   -- Substitute free type variables in 't' with mapping found in Subst.
   apply :: Subst -> t -> t
 
-  -- Returns list of type variables found in 't'.
-  tvars :: t -> S.Set Type
+  -- Returns list of free type variables found in 't'.
+  ftvs :: t -> S.Set Type
 
 instance Substitutable a => Substitutable [a] where
   apply s = map (apply s)
 
-  tvars = foldl (\tvs t -> S.union tvs (tvars t)) S.empty
+  ftvs = foldl (\tvs t -> S.union tvs (ftvs t)) S.empty
 
 -- | Replace all the type variables with its mapping.
 --
 -- >>> apply (M.fromList [("a",TVar "x"),("b",TInt)]) (TFun (TVar "a") (TFun (TVar "b") TString))
 -- (-> x (-> Int String))
 --
--- >>> tvars (TFun (TVar "a") (TFun (TVar "b") TString))
+-- >>> ftvs (TFun (TVar "a") (TFun (TVar "b") TString))
 -- fromList [a,b]
 --
 instance Substitutable Type where
@@ -207,14 +154,14 @@ instance Substitutable Type where
   apply s (TList t) = TList (apply s t)
   apply _ t = t
 
-  tvars (TVar tv) = S.singleton (TVar tv)
-  tvars (TFun a r) = S.union (tvars a) (tvars r)
-  tvars (TList t) = tvars t
-  tvars _ = S.empty
+  ftvs (TVar tv) = S.singleton (TVar tv)
+  ftvs (TFun a r) = S.union (ftvs a) (ftvs r)
+  ftvs (TList t) = ftvs t
+  ftvs _ = S.empty
 
 instance Substitutable TypeScheme where
   apply s (Forall tvs t) = Forall tvs (apply s t)
-  tvars (Forall tvs _) = S.fromList (map TVar tvs)
+  ftvs (Forall tvs _) = S.fromList (map TVar tvs)
 
 -- | Compose two Substs together: apply u1's substitutions over u2's values.
 -- Example:
@@ -290,29 +237,42 @@ unifyTVar _ _ = error "Bad call to unifyTVar"
 -- False
 --
 occursCheck :: Type -> Type -> Bool
-occursCheck tv t = S.member tv (tvars t)
+occursCheck tv t = S.member tv (ftvs t)
 
-emptyTEnv :: TEnv
-emptyTEnv = M.empty
-
-emptySubst :: Subst
-emptySubst = M.empty
-
-lookupTEnv :: TEnv -> Name -> Maybe TypeScheme
-lookupTEnv tenv name = M.lookup name tenv
-
-insertTEnv :: TEnv -> Name -> TypeScheme -> TEnv
-insertTEnv tenv name t = M.insert name t tenv
-
--- | Close over unbounded type variables.
+-- | Find non-universally quantified type variables in the type scheme.
 --
--- Should only be used in let statements (for now), as in let-polymorphism.
--- Why don't functions get to generalize?
+-- >>> nonFree (Forall ["x"] (TVar "x"))
+-- fromList []
 --
-closeOver :: Subst -> Type -> TypeScheme
-closeOver s t =
-  let ftvs = S.difference (tvars t) (S.fromList (map TVar (M.keys s)))
-  in Forall (map toTName (S.elems ftvs)) t
+-- >>> nonFree (Forall [] (TVar "x"))
+-- fromList [x]
+--
+-- >>> nonFree (Forall ["x"] (TFun (TVar "x") (TFun (TVar "y") (TVar "z"))))
+-- fromList [y,z]
+--
+nonFree :: TypeScheme -> S.Set Type
+nonFree (Forall tvs t) =
+  let ftv' = ftvs t
+  in ftv' `S.difference` S.fromList (map TVar tvs)
+
+-- | Find non-universally quantified type variables in the type schemes.
+--
+-- >>> nonFrees [(Forall [] (TVar "a")), (Forall ["x"] (TFun (TVar "x") (TFun (TVar "y") (TVar "z"))))]
+-- fromList [a,y,z]
+--
+nonFrees :: [TypeScheme] -> S.Set Type
+nonFrees = foldl (\s ts -> s `S.union` nonFree ts) S.empty
+
+-- | Generalize unbounded type variables into a for-all type scheme.
+--
+-- >>> generalize (M.fromList [("foo",Forall [] (TVar "a"))]) (M.fromList [("b",TInt)]) (TFun (TVar "a") (TFun (TVar "b") (TVar "c")))
+-- ∀:["c"] (-> a (-> b c))
+--
+generalize :: TEnv -> Subst -> Type -> TypeScheme
+generalize tenv s t =
+  let bounds = nonFrees (M.elems tenv)
+      ftv = (ftvs t `S.difference` S.fromList (map TVar (M.keys s)) `S.difference` bounds)
+  in Forall (map toTName (S.elems ftv)) t
 
 -- | Check type.
 --
@@ -340,12 +300,12 @@ check tenv s e = case e of
         return (s, t')
       Nothing -> throwE (UnboundVariable v)
 
-  Let (Var v) val body -> do
-    (s', valT) <- check tenv s val
-    let tenv' = insertTEnv tenv v (closeOver s' valT) -- let-polymorphism
-    (s'', valB) <- check tenv' s' body
+  Let (Var v) rhs body -> do
+    (s', rhsT) <- check tenv s rhs
+    let tenv' = insertTEnv tenv v (generalize tenv s' rhsT) -- let-polymorphism
+    (s'', bodyT) <- check tenv' s' body
     -- Return original tenv because 'v' is no longer in scope.
-    return (composeAll [s'', s', s], valB)
+    return (composeAll [s'', s', s], bodyT)
 
   Let{} -> throwE (GenericTypeError (Just "Let binding must be a variable"))
 
@@ -383,7 +343,7 @@ check tenv s e = case e of
     -- fresh we got.
     return (s', TFun (apply s' tv) bodyT)
 
-  Fun{} -> throwE (GenericTypeError (Just "Fun binding must be a variable"))
+  Fun{} -> throwE (GenericTypeError (Just "Function binding must be a variable"))
 
   NullaryApp body -> check tenv s body
 
@@ -398,27 +358,103 @@ check tenv s e = case e of
   Def{} -> error "TODO"
   Add{} -> error "TODO"
 
+-- | Rename and reorder type variables to look nice.
+--
+-- >>> runWithFreshCounter $ reorderTVars (TVar "b")
+-- Right a
+--
+-- >>> runWithFreshCounter $ reorderTVars (TFun (TVar "c") (TVar "b"))
+-- Right (-> a b)
+--
+-- >>> runWithFreshCounter $ reorderTVars (TFun (TVar "c") (TFun (TFun (TVar "c") (TVar "b")) (TVar "a")))
+-- Right (-> a (-> (-> a b) c))
+--
+-- >>> runWithFreshCounter $ reorderTVars (TFun (TVar "c") (TFun (TList (TVar "c")) (TVar "a")))
+-- Right (-> a (-> [a] b))
+--
+reorderTVars :: Type -> TypeCheck Type
+reorderTVars t = liftM snd (freshenWithSubst emptySubst (generalize emptyTEnv emptySubst t))
+
 -- | Insert fresh variables for universally-quantified types.
+--
+-- >>> runWithFreshCounter (freshen (Forall ["x","y"] (TFun (TVar "x") (TFun (TVar "y") (TVar "c")))))
+-- Right (-> a (-> b c))
 --
 freshen :: TypeScheme -> TypeCheck Type
 freshen ts = liftM snd (freshenWithSubst emptySubst ts)
 
--- | Insert fresh variables for universally-quantified types.
+-- | Insert fresh variables for universally-quantified types, given a Subst
+-- context.
+--
+-- >>> runWithFreshCounter (freshenWithSubst (M.fromList [("x",TInt)]) (Forall ["x","y"] (TFun (TVar "x") (TFun (TVar "y") (TVar "c")))))
+-- Right (fromList [("x",Int),("y",a)],(-> Int (-> a c)))
 --
 freshenWithSubst :: Subst -> TypeScheme -> TypeCheck (Subst, Type)
-freshenWithSubst s (Forall ftvs (TVar tv)) =
-  if tv `elem` ftvs
+freshenWithSubst s (Forall utvs (TVar tv)) =
+  if tv `elem` utvs
   then case M.lookup tv s of
        Just ftv -> return (s, ftv)
        Nothing -> do
          ftv <- getFresh
          return (M.insert tv ftv s, ftv)
   else return (s, TVar tv)
-freshenWithSubst s (Forall ftvs (TFun a r)) = do
-  (s1, a1) <- freshenWithSubst s (Forall ftvs a)
-  (s2, r1) <- freshenWithSubst s1 (Forall ftvs r)
+freshenWithSubst s (Forall utvs (TFun a r)) = do
+  (s1, a1) <- freshenWithSubst s (Forall utvs a)
+  (s2, r1) <- freshenWithSubst s1 (Forall utvs r)
   return (s2, TFun a1 r1)
+freshenWithSubst s (Forall utvs (TList tv)) = do
+  (s1, tv1) <- freshenWithSubst s (Forall utvs tv)
+  return (s1, TList tv1)
 freshenWithSubst s (Forall _ t) = return (s, t)
+
+------------------------------------------
+-- Utilities
+------------------------------------------
+
+emptyTEnv :: TEnv
+emptyTEnv = M.empty
+
+emptySubst :: Subst
+emptySubst = M.empty
+
+lookupTEnv :: TEnv -> Name -> Maybe TypeScheme
+lookupTEnv tenv name = M.lookup name tenv
+
+insertTEnv :: TEnv -> Name -> TypeScheme -> TEnv
+insertTEnv tenv name t = M.insert name t tenv
+
+letters :: [String]
+letters = [1..] >>= flip replicateM ['a'..'z']
+
+-- | Get fresh variable.
+--
+-- >>> runWithFreshCounter getFresh
+-- Right a
+--
+-- >>> evalState (runExceptT getFresh) (FreshCounter { getFreshCounter = 1 })
+-- Right b
+--
+getFresh :: TypeCheck Type
+getFresh = do
+  s <- lift get -- Same as: ExceptT (liftM Right get)
+  lift $ put s{getFreshCounter = getFreshCounter s + 1}
+  return $ TVar (letters !! getFreshCounter s)
+
+toScheme :: Type -> TypeScheme
+toScheme = Forall []
+
+toTName :: Type -> TName
+toTName (TVar t) = t
+toTName _ = error "Not TVar!"
+
+emptyGenericTypeError :: TypeError
+emptyGenericTypeError = GenericTypeError Nothing
+
+genericTypeError :: String -> TypeError
+genericTypeError msg = GenericTypeError (Just msg)
+
+initFreshCounter :: FreshCounter
+initFreshCounter = FreshCounter { getFreshCounter = 0 }
 
 ------------------------------------------
 -- Helpers to run the monad transformers.
@@ -432,3 +468,30 @@ runCheck tenv s expr =
   case evalState (runExceptT (check tenv s expr)) initFreshCounter of
     Left e -> error (show e)
     Right r -> r
+
+runWithFreshCounter :: ExceptT e (State FreshCounter) a -> Either e a
+runWithFreshCounter e = evalState (runExceptT e) initFreshCounter
+
+------------------------------------------
+-- Show instances
+------------------------------------------
+
+instance Show Type where
+  show TInt = "Int"
+  show TBool = "Bool"
+  show TString = "String"
+  show (TFun a r) = "(-> " ++ show a ++ " " ++ show r ++ ")"
+  show (TList a) = "[" ++ show a ++ "]"
+  show (TVar n) = n
+
+instance Show TypeScheme where
+  show (Forall tvs t) = "∀:" ++ show tvs ++ " " ++ show t
+
+instance Show TypeError where
+  show (Mismatch t1 t2) = "type mismatch: expecting " ++ show t1 ++ " but got " ++ show t2
+  show (FunctionExpected t) = "type mismatch: expecting function but got " ++ show t
+  show (UnboundVariable n) = "unbound variable " ++ n
+  show (InfiniteType tvar t) = "cannot resolve infinite type " ++ show tvar ++ " in " ++ show t
+  show (GenericTypeError (Just msg)) = "type error: " ++ msg
+  show (GenericTypeError Nothing) = "type error"
+
