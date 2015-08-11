@@ -18,7 +18,6 @@ data Exp = Lit Value
          | List [Exp]
          | Var Name          -- ^ Var "x"
          | Def Exp Exp       -- ^ Def (Var "x") Exp
-         | Add Exp Exp
          | NullaryFun Exp    -- ^ Fun Exp
          | Fun Exp Exp       -- ^ Fun (Var "x") Exp
          | NullaryApp Exp    -- ^ NullaryApp (Fun or Var)

@@ -54,8 +54,8 @@ xformVar v = "_nbln_" ++ v'
 
 -- | Emit definition binding.
 --
--- >>> emitDef emptyEnv (Var "x") (Add (Lit (IntV 3)) (Lit (IntV 55)))
--- "var _nbln_x = (3 + 55);\n"
+-- >>> emitDef emptyEnv (Var "x") (UnaryApp (Var "incr") (Lit (IntV 10)))
+-- "var _nbln_x = _nbln_incr(10);\n"
 --
 -- >>> emitDef emptyEnv (Var "x") (Var "y")
 -- "var _nbln_x = _nbln_y;\n"
@@ -67,16 +67,16 @@ emitDef _ _ _ = error "Definition has invalid variable name."
 
 -- | Emit nullary function.
 --
--- >>> emitNullaryFun emptyEnv (Add (Lit (IntV 3)) (Var "x"))
--- "(function () { return (3 + _nbln_x); })"
+-- >>> emitNullaryFun emptyEnv (UnaryApp (Var "incr") (Var "x"))
+-- "(function () { return _nbln_incr(_nbln_x); })"
 --
 emitNullaryFun :: Env -> Exp -> JSProgram
 emitNullaryFun env expr = "(function () { return " ++ emitExp env expr ++ "; })"
 
 -- | Emit unary function.
 --
--- >>> emitFun emptyEnv (Var "x") (Add (Lit (IntV 3)) (Var "x"))
--- "(function (_nbln_x) { return (3 + _nbln_x); })"
+-- >>> emitFun emptyEnv (Var "x") (UnaryApp (Var "incr") (Var "x"))
+-- "(function (_nbln_x) { return _nbln_incr(_nbln_x); })"
 --
 emitFun :: Env -> Exp -> Exp -> JSProgram
 emitFun env (Var v) expr = "(function (" ++ xformVar v ++ ") { return " ++ emitExp env expr ++ "; })"
@@ -88,11 +88,11 @@ emitFun _ _ _ = error "Invalid function definition."
 --
 -- Implemented as function call so that the variable is scoped only in the body.
 --
--- >>> emitLet emptyEnv (Var "x") (Lit (IntV 55)) (Add (Lit (IntV 3)) (Var "x"))
--- "(function (_nbln_x) { return (3 + _nbln_x); })(55)"
+-- >>> emitLet emptyEnv (Var "x") (Lit (IntV 55)) (Var "x")
+-- "(function (_nbln_x) { return _nbln_x; })(55)"
 --
--- >>> emitLet emptyEnv (Var "incr") (Fun (Var "x") (Add (Lit (IntV 1)) (Var "x"))) (UnaryApp (Var "incr") (Lit (IntV 10)))
--- "(function (_nbln_incr) { return _nbln_incr(10); })((function (_nbln_x) { return (1 + _nbln_x); }))"
+-- >>> emitLet emptyEnv (Var "incr") (Fun (Var "x") (Var "x")) (UnaryApp (Var "incr") (Lit (IntV 10)))
+-- "(function (_nbln_incr) { return _nbln_incr(10); })((function (_nbln_x) { return _nbln_x; }))"
 --
 emitLet :: Env -> Exp -> Exp -> Exp -> JSProgram
 emitLet env (Var v) val body = emitUnaryApp env (Fun (Var v) body) val
@@ -121,8 +121,8 @@ emitUnaryApp env expr arg = emitExp env expr ++ "(" ++ emitExp env arg ++ ")"
 -- >>> emitVector emptyEnv []
 -- "[]"
 --
--- >>> emitVector emptyEnv [Lit (IntV 1), Lit (IntV 3), (Let (Var "incr") (Fun (Var "x") (Add (Lit (IntV 1)) (Var "x"))) (UnaryApp (Var "incr") (Lit (IntV 10))))]
--- "[1,3,(function (_nbln_incr) { return _nbln_incr(10); })((function (_nbln_x) { return (1 + _nbln_x); }))]"
+-- >>> emitVector emptyEnv [Lit (IntV 1), Lit (IntV 3), (Let (Var "incr") (Fun (Var "x") (Var "x")) (UnaryApp (Var "incr") (Lit (IntV 10))))]
+-- "[1,3,(function (_nbln_incr) { return _nbln_incr(10); })((function (_nbln_x) { return _nbln_x; }))]"
 --
 emitVector :: Env -> [Exp] -> JSProgram
 emitVector _ [] = "[]"
@@ -142,15 +142,11 @@ emitIf _ _ = error "Invalid if statement."
 -- >>> emitExp emptyEnv (Var "x")
 -- "_nbln_x"
 --
--- >>> emitExp emptyEnv (Add (Lit (IntV 3)) (Lit (IntV 55)))
--- "(3 + 55)"
---
 emitExp :: Env -> Exp -> JSProgram
 emitExp _ (Lit v) = emitValue v
 emitExp env (List v) = emitVector env v
 emitExp _ (Var s) = xformVar s
 emitExp env (Def var expr) = emitDef env var expr
-emitExp env (Add left right) = "(" ++ emitExp env left ++ " + " ++ emitExp env right ++ ")"
 emitExp env (NullaryFun expr) = emitNullaryFun env expr
 emitExp env (Fun var expr) = emitFun env var expr
 emitExp env (UnaryApp fun arg) = emitUnaryApp env fun arg

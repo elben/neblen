@@ -369,7 +369,6 @@ check tenv s e = case e of
     return (composeAll [s3, s2, s1, s], apply s3 retT)
 
   Def{} -> error "TODO"
-  Add{} -> error "TODO"
 
 -- | Rename and reorder type variables to look nice.
 --

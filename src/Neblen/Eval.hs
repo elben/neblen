@@ -78,7 +78,6 @@ eval' env expr = case expr of
       _ -> neblenError expr
 
   Def {} -> error "TODO"
-  Add {} -> error "TODO"
 
 neblenError :: Exp -> t
 neblenError expr = error ("Neblen bug: " ++ toLisp expr ++ " should have been caught by type checker.")

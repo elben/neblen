@@ -41,7 +41,6 @@ toLisp (List []) = "[]"
 toLisp (List (a:as)) = "[" ++ toLisp a ++ foldl (\s e -> s ++ " " ++ toLisp e) "" as ++ "]"
 toLisp (Var v) = v
 toLisp (Def var body) = "(def " ++ toLisp var ++ " " ++ toLisp body ++ ")"
-toLisp (Add e1 e2) = "(+ " ++ toLisp e1 ++ " " ++ toLisp e2 ++ ")"
 toLisp (NullaryFun body) = "(fn [] " ++ toLisp body ++ ")"
 toLisp (Fun fn body) = "(fn [" ++ toLisp fn ++ "] " ++ toLisp body ++ ")"
 toLisp (NullaryApp body) = "(" ++ toLisp body ++ ")"
