@@ -11,24 +11,26 @@ import Data.Maybe (fromMaybe)
 
 type EvalEnv = M.Map Name Exp
 
+type Answer = (Exp, Type)
+
 data EvalError = UnboundedVariable Name
                | GenericError String
 
 -- | Evaluates Neblen program.
-evalS :: NeblenProgram -> NeblenProgram
-evalS p =
+parseAndEval :: NeblenProgram -> Either String Answer
+parseAndEval p =
   case parseProgram p of
-    Left err -> show err
+    Left err -> Left $ show err
     Right expr ->
       case eval expr of
-        Left err -> show err
-        Right expr' -> toLisp expr'
+        Left err -> Left $ show err
+        Right answer -> Right answer
 
 -- | Evaluates expression.
 --
-eval :: Exp -> Either TypeError Exp
+eval :: Exp -> Either TypeError Answer
 eval expr =
-  liftM (\_ -> eval' M.empty expr) (runWithFreshCounter (checkType expr))
+  liftM (\t -> (eval' M.empty expr, t)) (runWithFreshCounter (checkType expr))
 
 eval' :: EvalEnv -> Exp -> Exp
 eval' env expr = case expr of

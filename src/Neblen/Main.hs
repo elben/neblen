@@ -1,10 +1,11 @@
 module Neblen.Main where
 
 import Neblen.Data
-import Neblen.Compiler
+import Neblen.Eval
+import Neblen.Utils
 import System.Console.Haskeline
 import System.Process
-import Control.Monad.IO.Class
+import Data.List
 
 execJS :: JSProgram -> IO String
 execJS = readProcess "node" ["-p"]
@@ -17,8 +18,13 @@ main = runInputT defaultSettings loop
     case minput of
       Nothing -> outputStrLn "Exiting..."
       Just input -> do
-        let js = compile input
-        answer <- liftIO (execJS js)
-        -- outputStrLn $ js
-        outputStrLn answer
+        let typeCheck = isPrefixOf ":t " input
+        let input' = if typeCheck then (input \\ ":t ") else input
+        let answer = parseAndEval input'
+        case answer of
+          Left e -> outputStrLn e
+          Right (e, t) ->
+            if typeCheck
+            then outputStrLn (show t)
+            else outputStrLn (toLisp e ++ " : " ++ show t)
         loop

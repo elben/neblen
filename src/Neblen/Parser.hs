@@ -429,6 +429,20 @@ parseVarExpPair = do
   body <- parseExp
   return (var, body)
 
+-- | Parse if.
+--
+-- >>> parse parseIf "" "(if true (x 1) (y 1))"
+-- Right (If (Lit (BoolV True)) (UnaryApp (Var "x") (Lit (IntV 1))) (UnaryApp (Var "y") (Lit (IntV 1))))
+--
+parseIf :: Parser Exp
+parseIf = do
+  parseStartsListWith "if"
+  p <- parseExp
+  _ <- skipSpaces1
+  t <- parseExp
+  e <- parseBodyOfFun
+  return (If p t e)
+
 -- | Parse expression.
 --
 -- >>> parse parseExp "" "\"abc\""
@@ -464,6 +478,9 @@ parseVarExpPair = do
 -- >>> parse parseExp "" "(let [x 1 y 2] (+ x y))"
 -- Right (Let (Var "x") (Lit (IntV 1)) (Let (Var "y") (Lit (IntV 2)) (UnaryApp (UnaryApp (Var "+") (Var "x")) (Var "y"))))
 --
+-- >>> parse parseExp "" "(let [x 1 y 2] (if true x y))"
+-- Right (Let (Var "x") (Lit (IntV 1)) (Let (Var "y") (Lit (IntV 2)) (If (Lit (BoolV True)) (Var "x") (Var "y"))))
+--
 parseExp :: Parser Exp
 parseExp =
   try parseString <|>
@@ -472,10 +489,11 @@ parseExp =
   try parseList <|>
   try parseVector <|>
   try parseDef <|>
+  try parseIf <|>
+  try parseLet <|>
   try parseUnaryApp <|>
   try parseNullaryApp <|>
   try parseFun <|>
-  try parseLet <|>
   try parseVar
 
 -- | Parse a line of expression.

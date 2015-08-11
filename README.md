@@ -1,4 +1,21 @@
-A programming language.
+A programming language, a typed Lisp, a fun time.
+
+```
+Neblen> ((fn [x] x) true)
+true : Bool
+
+Neblen> (if true 100 200)
+100 : Int
+
+Neblen> (if true 100 "false!")
+type mismatch: expecting Int but got String
+
+Neblen> :t (fn [x] x)
+(-> a a)
+
+Neblen> :t ((fn [x] x) (fn [y] (y true)))
+(-> (-> Bool a) a)
+```
 
 # Development
 
@@ -9,17 +26,7 @@ cabal init sandbox
 cabal install --only-dep
 ```
 
-In `ghci`:
-
-```haskell
->> evalS "((fn [x] x) 4)"
-"4"
-
->> evalS "((fn [x] (x 4)) 4)"
-"type mismatch: expecting (-> Int b) but got Int"
-```
-
-A REPL is in the works.
+In `ghci`, run `main` to run the REPL. Try the snippets above.
 
 # Tests
 
