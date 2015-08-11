@@ -26,6 +26,24 @@ parseAndEval p =
         Left err -> Left $ show err
         Right answer -> Right answer
 
+-- TODO is this what we need? What is the difference between eval and
+-- substitution???
+--
+-- Some diff:
+--
+-- - Function applications don't get applied, just substituted.
+-- - In a (Fun v e), v is also substituted.
+--
+subst :: EvalEnv -> Exp -> Exp
+subst env expr = case expr of
+  Lit {} -> expr
+  List es -> List (map (subst env) es)
+  Var n -> fromMaybe (Var n) (M.lookup n env)
+  NullaryFun e -> NullaryFun (subst env e)
+  Fun v e -> Fun v (subst env e)
+  UnaryApp f e -> UnaryApp (subst env f) (subst env e)
+  e -> e
+
 -- | Evaluates expression.
 --
 eval :: Exp -> Either TypeError Answer
@@ -41,29 +59,27 @@ eval' env expr = case expr of
 
   List es -> List (map (eval' env) es)
 
-  NullaryFun {} -> expr
+  NullaryFun e -> NullaryFun (subst env e)
 
-  Fun {} -> expr
+  Fun (Var n) e -> do Fun (Var n) (subst env e)
+  Fun {} -> neblenError expr
 
   NullaryApp e -> eval' env e
 
-  -- Two types of application:
+  -- Two cases for application:
   --
   -- ((fn [x] x) 3)
-  -- (let [f (fn [x] x)] (f 3))
+  -- (x y)
   --
   UnaryApp f e -> do
-    let f' = eval' env f
     let e' = eval' env e
-    case f' of
+    case f of
       Fun (Var n) fn -> do
         let env' = M.insert n e' env
         eval' env' fn
-      Var n ->
-        case M.lookup n env of
-          Just fn -> eval' env (UnaryApp fn e)
-          Nothing -> neblenError expr
-      _ -> neblenError expr
+      other -> do
+        let f' = eval' env other
+        eval' env (UnaryApp f' e)
 
   Let (Var n) val body -> do
     let val' = eval' env val

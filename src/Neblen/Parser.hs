@@ -516,8 +516,8 @@ parseLine = do
 -- >>> parseProgram "(+ 1 2)"
 -- Right (UnaryApp (UnaryApp (Var "+") (Lit (IntV 1))) (Lit (IntV 2)))
 --
--- >>> parseProgram "(fn [x] x)"
--- Right (Fun (Var "x") (Var "x"))
+-- >>> parseProgram "(fn [x y] (x y))"
+-- Right (Fun (Var "x") (Fun (Var "y") (UnaryApp (Var "x") (Var "y"))))
 --
 -- >>> isLeft $ parseProgram "+ 13"
 -- True

@@ -1,14 +1,14 @@
 A programming language, a typed Lisp, a fun time.
 
 ```
-Neblen> ((fn [x] x) true)
-true : Bool
-
 Neblen> (if true 100 200)
 100 : Int
 
 Neblen> (if true 100 "false!")
 type mismatch: expecting Int but got String
+
+Neblen> ((fn [x y] x) true)
+(fn [y] true) : (-> a Bool)
 
 Neblen> :t (fn [x] x)
 (-> a a)
