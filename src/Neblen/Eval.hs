@@ -53,8 +53,9 @@ eval' env expr = case expr of
   -- (let [f (fn [x] x)] (f 3))
   --
   UnaryApp f e -> do
+    let f' = eval' env f
     let e' = eval' env e
-    case f of
+    case f' of
       Fun (Var n) fn -> do
         let env' = M.insert n e' env
         eval' env' fn

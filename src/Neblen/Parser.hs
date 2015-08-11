@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module Neblen.Parser where
 
 import Neblen.Data
@@ -8,7 +6,6 @@ import qualified Control.Applicative as A
 import qualified Data.Set as S
 
 -- $setup
--- >>> :set -XOverloadedStrings
 -- >>> import Data.Either
 
 -- | Skip one or more spaces.
@@ -290,7 +287,7 @@ parseDef = try $ do
 parseUnaryApp :: Parser Exp
 parseUnaryApp = try $ do
   _ <- char '('
-  varOrFn <- parseVar <|> parseFun
+  varOrFn <- parseExp
   skipSpaces1
   args <- parseExps
   _ <- char ')'

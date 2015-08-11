@@ -4,6 +4,7 @@ import Test.Framework
 import Data.Monoid
 
 import qualified Neblen.TypeChecker.Tests
+import qualified Neblen.Eval.Tests
 
 -- Get empty options and update with our options.
 runnerOpts :: RunnerOptions
@@ -15,6 +16,8 @@ runnerOpts = mempty {
 main :: IO ()
 main =
   defaultMainWithOpts
-    [ Neblen.TypeChecker.Tests.tests
+    [
+      Neblen.TypeChecker.Tests.tests
+    , Neblen.Eval.Tests.tests
     ]
     runnerOpts

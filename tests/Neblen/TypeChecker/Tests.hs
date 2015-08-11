@@ -219,15 +219,15 @@ testCheckFun =
 testCheckNullApp :: [Test]
 testCheckNullApp =
   [
-    testCase "testNullApp" $
+    testCase "checkNullaryApp" $
     run (check (M.fromList [("x",toScheme TBool)]) emptySubst (NullaryApp (Var "x")))
     @?= (M.fromList [],TBool)
 
-  , testCase "testNullApp" $
+  , testCase "checkNullaryApp" $
     run (check emptyTEnv emptySubst (NullaryApp (NullaryFun (Lit (BoolV True)))))
     @?= (M.fromList [],TBool)
 
-  , testCase "testNullApp" $
+  , testCase "checkNullaryApp" $
     expectE (check emptyTEnv emptySubst (NullaryApp (Var "x")))
     @?= UnboundVariable "x"
   ]
