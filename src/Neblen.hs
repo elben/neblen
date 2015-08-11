@@ -7,3 +7,4 @@ import Neblen.Compiler as X
 import Neblen.Parser as X
 import Neblen.Main as X
 import Neblen.TypeChecker as X
+import Neblen.Eval as X

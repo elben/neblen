@@ -12,6 +12,8 @@ import qualified Data.List as L
 -- >>> import Neblen.Compiler
 --
 
+type Env = M.Map String Value
+
 emptyEnv :: Env
 emptyEnv = M.empty
 

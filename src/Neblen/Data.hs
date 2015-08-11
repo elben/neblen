@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module Neblen.Data where
 
 import qualified Data.Map.Strict as M
@@ -8,8 +6,6 @@ import qualified Data.Set as S
 type NeblenProgram = String
 
 type JSProgram = String
-
-type Env = M.Map String Value
 
 type Name = String
 

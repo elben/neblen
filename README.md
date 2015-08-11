@@ -1,11 +1,25 @@
-I don't know what Neblen is.
+A programming language.
 
 # Development
 
 ```
+cd ~/code/neblen
+
 cabal init sandbox
 cabal install --only-dep
 ```
+
+In `ghci`:
+
+```haskell
+>> evalS "((fn [x] x) 4)"
+"4"
+
+>> evalS "((fn [x] (x 4)) 4)"
+"type mismatch: expecting (-> Int b) but got Int"
+```
+
+A REPL is in the works.
 
 # Tests
 

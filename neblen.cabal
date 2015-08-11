@@ -9,6 +9,7 @@ library
                     Neblen.Compiler
                     Neblen.Parser
                     Neblen.Data
+                    Neblen.Eval
 
   build-depends:    base == 4.*
                   , containers >= 0.5.0.0
