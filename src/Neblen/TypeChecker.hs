@@ -282,7 +282,7 @@ generalize tenv s t =
 --
 checkType :: Exp -> TypeCheck Type
 checkType e = do
-  (_, t) <- check emptyTEnv emptySubst e
+  (_, t) <- check defaultTEnv emptySubst e
   case evalState (runExceptT (reorderTVars t)) initFreshCounter of
     Right t' -> return t'
     Left err -> throwE err
@@ -368,6 +368,7 @@ check tenv s e = case e of
     s3 <- unify (apply s2 fnT) (apply s2 (TFun argT retT))
     return (composeAll [s3, s2, s1, s], apply s3 retT)
 
+  BinOp{} -> error "Shouldn't need to type check BinOps."
   Def{} -> error "TODO"
 
 -- | Rename and reorder type variables to look nice.
@@ -425,6 +426,17 @@ freshenWithSubst s (Forall _ t) = return (s, t)
 ------------------------------------------
 -- Utilities
 ------------------------------------------
+
+defaultTEnv :: M.Map Name TypeScheme
+defaultTEnv = M.fromList [
+  ("+", Forall [] (TFun TInt (TFun TInt TInt)))
+ ,("-", Forall [] (TFun TInt (TFun TInt TInt)))
+ ,("*", Forall [] (TFun TInt (TFun TInt TInt)))
+
+ ,("and", Forall [] (TFun TBool (TFun TBool TBool)))
+ ,("or", Forall [] (TFun TBool (TFun TBool TBool)))
+ ,("xor", Forall [] (TFun TBool (TFun TBool TBool)))
+  ]
 
 emptyTEnv :: TEnv
 emptyTEnv = M.empty

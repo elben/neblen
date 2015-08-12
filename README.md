@@ -7,6 +7,9 @@ Neblen> (if true 100 200)
 Neblen> (if true 100 "false!")
 type mismatch: expecting Int but got String
 
+Neblen> (let [twice (fn [f x] (f (f x)))] ((twice (+ 1)) 10))
+12 : Int
+
 Neblen> ((fn [x y] x) true)
 (fn [y] true) : (-> a Bool)
 

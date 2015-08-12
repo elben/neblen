@@ -47,6 +47,7 @@ toLisp (NullaryApp body) = "(" ++ toLisp body ++ ")"
 toLisp (UnaryApp fn body) = "(" ++ toLisp fn ++ " " ++ toLisp body ++ ")"
 toLisp (Let v e body) = "(let [" ++ toLisp v ++ " " ++ toLisp e ++ "] " ++ toLisp body ++ ")"
 toLisp (If p t e) = "(if " ++ toLisp p ++ " " ++ toLisp t ++ " " ++ toLisp e ++ ")"
+toLisp (BinOp f a b) = "(" ++ f ++ " " ++ toLisp a ++ " " ++ toLisp b ++ ")"
 
 -- | Pretty-format a Neblen program.
 pretty :: String -> String

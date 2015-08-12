@@ -24,7 +24,7 @@ data Exp = Lit Value
          | UnaryApp Exp Exp  -- ^ UnaryApp (Fun or Var) (Argument value)
          | Let Exp Exp Exp   -- ^ Let (Var "x") (Value of x) Body.
          | If Exp Exp Exp    -- ^ If (Predicate : Bool) (Then clause) (Else clause)
-        -- ^ TODO: Convert let to macro that uses function.
+         | BinOp String Exp Exp
   deriving (Show, Eq)
 
 -- | Symbols that can be part of symbol-only identifiers.

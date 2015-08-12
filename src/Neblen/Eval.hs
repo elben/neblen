@@ -42,13 +42,25 @@ subst env expr = case expr of
   NullaryFun e -> NullaryFun (subst env e)
   Fun v e -> Fun v (subst env e)
   UnaryApp f e -> UnaryApp (subst env f) (subst env e)
+  BinOp f a b -> BinOp f (subst env a) (subst env b)
   e -> e
+
+defaultEnv :: M.Map Name Exp
+defaultEnv = M.fromList [
+  ("+", Fun (Var "a") (Fun (Var "b") (BinOp "+" (Var "a") (Var "b"))))
+ ,("-", Fun (Var "a") (Fun (Var "b") (BinOp "-" (Var "a") (Var "b"))))
+ ,("*", Fun (Var "a") (Fun (Var "b") (BinOp "*" (Var "a") (Var "b"))))
+
+ ,("and", Fun (Var "a") (Fun (Var "b") (BinOp "and" (Var "a") (Var "b"))))
+ ,("or", Fun (Var "a") (Fun (Var "b") (BinOp "or" (Var "a") (Var "b"))))
+ ,("xor", Fun (Var "a") (Fun (Var "b") (BinOp "xor" (Var "a") (Var "b"))))
+  ]
 
 -- | Evaluates expression.
 --
 eval :: Exp -> Either TypeError Answer
 eval expr =
-  liftM (\t -> (eval' M.empty expr, t)) (runWithFreshCounter (checkType expr))
+  liftM (\t -> (eval' defaultEnv expr, t)) (runWithFreshCounter (checkType expr))
 
 eval' :: EvalEnv -> Exp -> Exp
 eval' env expr = case expr of
@@ -61,7 +73,7 @@ eval' env expr = case expr of
 
   NullaryFun e -> NullaryFun (subst env e)
 
-  Fun (Var n) e -> do Fun (Var n) (subst env e)
+  Fun (Var n) e -> Fun (Var n) (subst env e)
   Fun {} -> neblenError expr
 
   NullaryApp e -> eval' env e
@@ -94,7 +106,33 @@ eval' env expr = case expr of
       Lit (BoolV False) -> eval' env e
       _ -> neblenError expr
 
+  BinOp fn a b -> case fn of
+    "+" -> Lit (IntV (extractInt (eval' env a) + extractInt (eval' env b)))
+    "-" -> Lit (IntV (extractInt (eval' env a) - extractInt (eval' env b)))
+    "*" -> Lit (IntV (extractInt (eval' env a) * extractInt (eval' env b)))
+
+    "and" -> Lit (BoolV (extractBool (eval' env a) && extractBool (eval' env b)))
+    "or" -> Lit (BoolV (extractBool (eval' env a) || extractBool (eval' env b)))
+    "xor" ->
+      let a' = extractBool (eval' env a)
+          b' = extractBool (eval' env b)
+          c = (a' && not b') || (not a' && b')
+      in Lit (BoolV c)
+    _ -> error "Invalid BinOp."
+
   Def {} -> error "TODO"
+
+extractInt :: Exp -> Int
+extractInt (Lit (IntV v)) = v
+extractInt _ = error "not an int"
+
+extractBool :: Exp -> Bool
+extractBool (Lit (BoolV v)) = v
+extractBool _ = error "not a bool"
+
+extractString :: Exp -> String
+extractString (Lit (StringV v)) = v
+extractString _ = error "not a string"
 
 neblenError :: Exp -> t
 neblenError expr = error ("Neblen bug: " ++ toLisp expr ++ " should have been caught by type checker.")
