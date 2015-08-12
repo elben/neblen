@@ -18,13 +18,12 @@ main = runInputT defaultSettings loop
     case minput of
       Nothing -> outputStrLn "Exiting..."
       Just input -> do
-        let typeCheck = isPrefixOf ":t " input
-        let input' = if typeCheck then (input \\ ":t ") else input
+        let typeCheck = ":t " `isPrefixOf` input
+        let input' = if typeCheck then input \\ ":t " else input
+        -- TODO only checkType if :t?
         let answer = parseAndEval input'
         case answer of
           Left e -> outputStrLn e
           Right (e, t) ->
-            if typeCheck
-            then outputStrLn (show t)
-            else outputStrLn (toLisp e ++ " : " ++ show t)
+            outputStrLn (input' ++ " : " ++ show t)
         loop

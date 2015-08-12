@@ -8,10 +8,10 @@ Neblen> (let [twice (fn [f x] (f (f x)))] ((twice (+ 1)) 10))
 12 : Int
 
 Neblen> :t (fn [x] x)
-(-> a a)
+(fn [x] x) : (-> a a)
 
 Neblen> :t ((fn [x] x) (fn [y] (y true)))
-(-> (-> Bool a) a)
+((fn [x] x) (fn [y] (y true))) : (-> (-> Bool a) a)
 ```
 
 # Development
