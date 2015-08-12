@@ -1,17 +1,11 @@
 A programming language, a typed Lisp, a fun time.
 
 ```
-Neblen> (if true 100 200)
-100 : Int
-
-Neblen> (if true 100 "false!")
-type mismatch: expecting Int but got String
+Neblen> (let [incr (+ 1)] (incr (incr 10)))
+12 : Int
 
 Neblen> (let [twice (fn [f x] (f (f x)))] ((twice (+ 1)) 10))
 12 : Int
-
-Neblen> ((fn [x y] x) true)
-(fn [y] true) : (-> a Bool)
 
 Neblen> :t (fn [x] x)
 (-> a a)
