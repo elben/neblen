@@ -25,5 +25,7 @@ main = runInputT defaultSettings loop
         case answer of
           Left e -> outputStrLn e
           Right (e, t) ->
-            outputStrLn (input' ++ " : " ++ show t)
+            if typeCheck
+            then outputStrLn (input' ++ " : " ++ show t)
+            else outputStrLn (toLisp e ++ " : " ++ show t)
         loop

@@ -76,19 +76,32 @@ eval' env expr = case expr of
   Fun (Var n) e -> Fun (Var n) (subst env e)
   Fun {} -> neblenError expr
 
+  MultiFun vs e -> MultiFun vs (subst env e)
+
   NullaryApp e -> eval' env e
 
-  -- Two cases for application:
+  -- Two cases for function application:
   --
-  -- ((fn [x] x) 3)
-  -- (x y)
+  -- - If `f` is a function, apply the expression into the function.
+  -- - Otherwise, re-try the application after eval-ing `f`.
   --
   UnaryApp f e -> do
     let e' = eval' env e
     case f of
-      Fun (Var n) fn -> do
+      -- Fun (Var n) fn -> do
+      --   let env' = M.insert n e' env
+      --   eval' env' fn
+
+      -- Only one arg left, so do the apply.
+      MultiFun [Var n] fn -> do
         let env' = M.insert n e' env
         eval' env' fn
+
+      -- Curry; apply only one level.
+      MultiFun (Var n:vs) fn -> do
+        let env' = M.insert n e' env
+        eval' env' (MultiFun vs fn)
+
       other -> do
         let f' = eval' env other
         eval' env (UnaryApp f' e)

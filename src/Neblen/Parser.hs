@@ -282,7 +282,7 @@ parseDef = try $ do
 -- Right (UnaryApp (UnaryApp (UnaryApp (Var "x") (Lit (IntV 1))) (Lit (IntV 2))) (Lit (IntV 3)))
 --
 -- >>> parse parseUnaryApp "" "((fn [x y z] (+ x y)) 1 2 3)"
--- Right (UnaryApp (UnaryApp (UnaryApp (Fun (Var "x") (Fun (Var "y") (Fun (Var "z") (UnaryApp (UnaryApp (Var "+") (Var "x")) (Var "y"))))) (Lit (IntV 1))) (Lit (IntV 2))) (Lit (IntV 3)))
+-- Right (UnaryApp (UnaryApp (UnaryApp (MultiFun [Var "x",Var "y",Var "z"] (UnaryApp (UnaryApp (Var "+") (Var "x")) (Var "y"))) (Lit (IntV 1))) (Lit (IntV 2))) (Lit (IntV 3)))
 --
 parseUnaryApp :: Parser Exp
 parseUnaryApp = try $ do
@@ -342,6 +342,18 @@ parseFun = do
   argsVec <- parseVecOfVars
   body <- parseBodyOfFun
   return $ buildFunCurry body argsVec
+
+-- | Parse functions.
+--
+-- >>> parse parseMultiFun "" "(fn [x y z] (x y z))"
+-- Right (MultiFun [Var "x",Var "y",Var "z"] (UnaryApp (UnaryApp (Var "x") (Var "y")) (Var "z")))
+--
+parseMultiFun :: Parser Exp
+parseMultiFun = do
+  parseStartsListWith "fn"
+  argsVec <- parseVecOfVars
+  body <- parseBodyOfFun
+  return $ MultiFun argsVec body
 
 parseStartsListWith :: String -> Parser ()
 parseStartsListWith keyword = do
@@ -490,7 +502,8 @@ parseExp =
   try parseLet <|>
   try parseUnaryApp <|>
   try parseNullaryApp <|>
-  try parseFun <|>
+  try parseMultiFun <|>
+  -- try parseFun <|>
   try parseVar
 
 -- | Parse a line of expression.
@@ -517,11 +530,9 @@ parseLine = do
 -- Right (UnaryApp (UnaryApp (Var "+") (Lit (IntV 1))) (Lit (IntV 2)))
 --
 -- >>> parseProgram "(fn [x y] (x y))"
--- Right (Fun (Var "x") (Fun (Var "y") (UnaryApp (Var "x") (Var "y"))))
+-- Right (MultiFun [Var "x",Var "y"] (UnaryApp (Var "x") (Var "y")))
 --
 -- >>> isLeft $ parseProgram "+ 13"
 -- True
 parseProgram :: NeblenProgram -> Either ParseError Exp
 parseProgram = parse parseLine ""
-
-

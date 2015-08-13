@@ -43,6 +43,7 @@ toLisp (Var v) = v
 toLisp (Def var body) = "(def " ++ toLisp var ++ " " ++ toLisp body ++ ")"
 toLisp (NullaryFun body) = "(fn [] " ++ toLisp body ++ ")"
 toLisp (Fun fn body) = "(fn [" ++ toLisp fn ++ "] " ++ toLisp body ++ ")"
+toLisp (MultiFun vs body) = "(fn [" ++ unwords (map toLisp vs) ++ "] " ++ toLisp body ++ ")"
 toLisp (NullaryApp body) = "(" ++ toLisp body ++ ")"
 toLisp (UnaryApp fn body) = "(" ++ toLisp fn ++ " " ++ toLisp body ++ ")"
 toLisp (Let v e body) = "(let [" ++ toLisp v ++ " " ++ toLisp e ++ "] " ++ toLisp body ++ ")"

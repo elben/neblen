@@ -4,6 +4,7 @@ module Neblen.TypeChecker where
 
 import Neblen.Data
 import qualified Data.Map.Strict as M
+import qualified Data.List as L
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as S
 import Control.Monad
@@ -107,6 +108,7 @@ data Type = TInt
           | TBool
           | TString
           | TFun Type Type
+          | TMultiFun [Type]
           | TList Type
           | TVar TName
   deriving (Eq, Ord) -- Ord for Set functions
@@ -151,11 +153,13 @@ instance Substitutable a => Substitutable [a] where
 instance Substitutable Type where
   apply s (TVar tv) = fromMaybe (TVar tv) (M.lookup tv s)
   apply s (TFun a r) = TFun (apply s a) (apply s r)
+  apply s (TMultiFun vs) = TMultiFun (map (apply s) vs)
   apply s (TList t) = TList (apply s t)
   apply _ t = t
 
   ftvs (TVar tv) = S.singleton (TVar tv)
   ftvs (TFun a r) = S.union (ftvs a) (ftvs r)
+  ftvs (TMultiFun vs) = foldl (\s v -> S.union s (ftvs v)) S.empty vs
   ftvs (TList t) = ftvs t
   ftvs _ = S.empty
 
@@ -195,18 +199,49 @@ composeAll = foldl compose emptySubst
 
 -- | Unify types.
 --
+-- Unification attempts to create a new Subst universe with new mappings of type
+-- variables to types. A simple case:
+--
+--   @a <==> Int@
+--
+-- When trying to unify @a@ with @Int@, we can simply map @a => Int@.
+--
 unify :: Type -> Type -> TypeCheck Subst
 unify TInt TInt = return emptySubst
 unify TBool TBool = return emptySubst
 unify TString TString = return emptySubst
 unify (TVar tv) t2 = unifyTVar (TVar tv) t2
 unify t1 (TVar tv) = unifyTVar (TVar tv) t1
-unify (TFun a1 r1) (TFun a2 r2) = do
-  s' <- unify a1 a2
-  s'' <- unify (apply s' r1) (apply s' r2)
-  -- We now have a substitution built from both argument and return types. Substitue
-  -- any remaining type variables.
-  return (composeAll [s'', s'])
+-- unify (TFun a1 r1) (TFun a2 r2) = do
+--   s' <- unify a1 a2
+--   s'' <- unify (apply s' r1) (apply s' r2)
+--   -- We now have a substitution built from both argument and return types. Substitue
+--   -- any remaining type variables.
+--   return (composeAll [s'', s'])
+
+-- Example:
+--
+--        (-> a b c) <==> (-> Int String z)
+-- TMultiFun [a b c] <==> TMultiFun [Int String z]
+--
+-- We unify each argument one at a time, composing and applying the new Subst
+-- at each step.
+--
+unify (TMultiFun as) (TMultiFun bs) =
+  if length as /= length bs
+  then throwE $ Mismatch (TMultiFun as) (TMultiFun bs)
+  else
+    -- Zip up both function's argument types. Start with an empty substitution.
+    -- Then, go through each type pair and unify them, composing the resulting
+    -- substitution with the previous one.
+    --
+    -- We do this in the TypeCheck context since `unify` must be called inside
+    -- the fold.
+    foldl
+      (\s (a,b) -> do
+        s1 <- unify a b
+        liftM (compose s1) s)
+      (return emptySubst) (L.zip as bs)
 
 -- Assume order implies attempted function call on a non-function.
 unify t TFun{} = throwE (FunctionExpected t)
@@ -358,18 +393,97 @@ check tenv s e = case e of
 
   Fun{} -> throwE (GenericTypeError (Just "Function binding must be a variable"))
 
+  MultiFun vs body ->
+    if not (isListOfVars vs)
+    then throwE (GenericTypeError (Just "MultiFun only accepts list of variables"))
+    else do
+     -- Get fresh type variables for every argument variable.
+     tvs <- mapM (const getFresh) vs
+
+     -- Zip the argument variables with its corresponding (fresh) type variables.
+     -- Then insert all of these into the type env.
+     let tenv' = foldl (\te (Var v, tv) -> insertTEnv te v (toScheme tv)) tenv (L.zip vs tvs)
+
+     (s', bodyT) <- check tenv' s body
+
+     -- May have discovered some arguments' type when body was checked, so apply
+     -- new substitution. If not, use the fresh we got.
+     let tvs' = map (apply s') tvs
+
+     return (s, TMultiFun (tvs' ++ [bodyT]))
+
   NullaryApp body -> check tenv s body
 
-  UnaryApp fn arg -> do
-    (s1, fnT) <- check tenv s fn
-    (s2, argT) <- check tenv s1 arg
-    retT <- getFresh
+--   UnaryApp fn arg -> do
+--     (s1, fnT) <- check tenv s fn
+--     (s2, argT) <- check tenv s1 arg
+--     retT <- getFresh
 
-    s3 <- unify (apply s2 fnT) (apply s2 (TFun argT retT))
-    return (composeAll [s3, s2, s1, s], apply s3 retT)
+--     s3 <- unify (apply s2 fnT) (apply s2 (TFun argT retT))
+--     return (composeAll [s3, s2, s1, s], apply s3 retT)
+
+  -- To check the type, build two MultiFun types, one for @fn@ and one for
+  -- @body@. Then attempt to unify.
+  --
+  -- For example, say we have this application:
+  --
+  --   ((fn [x y z] 0) true)
+  --
+  -- There are two parts:
+  --
+  --   (fn [x y z] 0) : (-> a b c Int)
+  --   true           : Bool
+  --
+  -- To unify these, fresh variables are instantiated for the body expression,
+  -- to two types which are then unified:
+  --
+  --   (-> a b c Int) <==> (-> Bool d e f)
+  --   ==> (-> Bool b c Int)
+  --
+  --   ((fn [x y z] 0) true) : (-> b c Int)
+  --
+  UnaryApp fn body -> do
+    (s1, fnT) <- check tenv s fn
+
+    if not (isTMultiFun fnT)
+    -- Expression in function position not a function; error.
+    then throwE (FunctionExpected fnT)
+    else do
+      -- Find type of body, which is the first argument of the function.
+      (s2, bodyT) <- check tenv s1 body
+
+      -- Get fresh type vars for the remaining arguments.
+      tvs <- replicateM (getNumArgs fnT) getFresh
+
+      s3 <- unify (apply s2 fnT) (apply s2 (TMultiFun (bodyT:tvs)))
+
+      let tvs' = map (apply s3) tvs
+
+      let retT = if length tvs' == 1
+                 -- Was a unary function, so no more functions to return.
+                 -- Return the final result.
+                 then head tvs'
+                 -- Multi-arity function, so curry the rest of the function
+                 -- as the return type.
+                 else TMultiFun tvs'
+
+      return (composeAll [s3, s2, s1, s], retT)
 
   BinOp{} -> error "Shouldn't need to type check BinOps."
   Def{} -> error "TODO"
+
+getNumArgs :: Type -> Int
+getNumArgs (TMultiFun vs) = length vs - 1
+getNumArgs _ = 0
+
+isTMultiFun :: Type -> Bool
+isTMultiFun TMultiFun{} = True
+isTMultiFun _ = False
+
+isListOfVars :: [Exp] -> Bool
+isListOfVars [] = True
+isListOfVars (Var _:vs) = isListOfVars vs
+isListOfVars _ = False
 
 -- | Rename and reorder type variables to look nice.
 --
@@ -418,6 +532,39 @@ freshenWithSubst s (Forall utvs (TFun a r)) = do
   (s1, a1) <- freshenWithSubst s (Forall utvs a)
   (s2, r1) <- freshenWithSubst s1 (Forall utvs r)
   return (s2, TFun a1 r1)
+
+-- Perhaps this is the simpler solution, compared to below.
+-- freshenWithSubst s (Forall _ (TMultiFun [])) = return (s, TMultiFun [])
+-- freshenWithSubst s (Forall utvs (TMultiFun [v])) = do
+--   (s1, v1) <- freshenWithSubst s (Forall utvs v)
+--   return (s1, TMultiFun [v1])
+-- freshenWithSubst s (Forall utvs (TMultiFun (v:vs))) = do
+--   (s1, v1) <- freshenWithSubst s (Forall utvs v)
+--   (s2, v2) <- freshenWithSubst s1 (Forall utvs (TMultiFun vs))
+--   return (s2, TMultiFun (v1:(getTMultiFunArgs v2)))
+
+freshenWithSubst s (Forall utvs (TMultiFun vs)) = do
+  -- For each argument variable:
+  --
+  -- * Grab the previous substitution and the already-freshened type vars list
+  -- * Freshen the current type
+  -- * Append that type to the already-freshened type vars list
+  --
+  -- For example, if we have @MultiFun [x y z]@, we will convert @x@ to @a@,
+  -- then @y@ to @b@, and so on. This will be built in the list as @[c b a]@.
+  -- Note it is backwards, since we use a foldl (and not foldr since we want
+  -- fresh variables in order). This is why we reverse it at the end.
+  --
+  (s', vs') <-
+    foldl
+      (\tc v -> do
+        (s1, sumArgs) <- tc
+        (s2, v1) <- freshenWithSubst s1 (Forall utvs v)
+        return (s2, v1:sumArgs))
+      (return (s, []))
+      vs
+  return (s', TMultiFun (reverse vs'))
+
 freshenWithSubst s (Forall utvs (TList tv)) = do
   (s1, tv1) <- freshenWithSubst s (Forall utvs tv)
   return (s1, TList tv1)
@@ -426,6 +573,10 @@ freshenWithSubst s (Forall _ t) = return (s, t)
 ------------------------------------------
 -- Utilities
 ------------------------------------------
+
+getTMultiFunArgs :: Type -> [Type]
+getTMultiFunArgs (TMultiFun args) = args
+getTMultiFunArgs _ = error "not TMultiFun"
 
 defaultTEnv :: M.Map Name TypeScheme
 defaultTEnv = M.fromList [
@@ -508,6 +659,7 @@ instance Show Type where
   show TBool = "Bool"
   show TString = "String"
   show (TFun a r) = "(-> " ++ show a ++ " " ++ show r ++ ")"
+  show (TMultiFun ts) = "(-> " ++ unwords (map show ts) ++ ")"
   show (TList a) = "[" ++ show a ++ "]"
   show (TVar n) = n
 
