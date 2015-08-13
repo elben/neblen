@@ -26,21 +26,14 @@ parseAndEval p =
         Left err -> Left $ show err
         Right answer -> Right answer
 
--- TODO is this what we need? What is the difference between eval and
--- substitution???
---
--- Some diff:
---
--- - Function applications don't get applied, just substituted.
--- - In a (Fun v e), v is also substituted.
+-- | Substitute variables in expression, but don't apply.
 --
 subst :: EvalEnv -> Exp -> Exp
 subst env expr = case expr of
   Lit {} -> expr
   List es -> List (map (subst env) es)
   Var n -> fromMaybe (Var n) (M.lookup n env)
-  NullaryFun e -> NullaryFun (subst env e)
-  Fun v e -> Fun v (subst env e)
+  MultiFun vs body -> MultiFun vs (subst env body)
   UnaryApp f e -> UnaryApp (subst env f) (subst env e)
   BinOp f a b -> BinOp f (subst env a) (subst env b)
   e -> e
@@ -71,11 +64,6 @@ eval' env expr = case expr of
 
   List es -> List (map (eval' env) es)
 
-  NullaryFun e -> NullaryFun (subst env e)
-
-  Fun (Var n) e -> Fun (Var n) (subst env e)
-  Fun {} -> neblenError expr
-
   MultiFun vs e -> MultiFun vs (subst env e)
 
   NullaryApp e -> eval' env e
@@ -88,10 +76,6 @@ eval' env expr = case expr of
   UnaryApp f e -> do
     let e' = eval' env e
     case f of
-      -- Fun (Var n) fn -> do
-      --   let env' = M.insert n e' env
-      --   eval' env' fn
-
       -- Only one arg left, so do the apply.
       MultiFun [Var n] fn -> do
         let env' = M.insert n e' env

@@ -107,7 +107,6 @@ type Subst = M.Map TName Type
 data Type = TInt
           | TBool
           | TString
-          | TFun Type Type
           | TMultiFun [Type]
           | TList Type
           | TVar TName
@@ -144,21 +143,19 @@ instance Substitutable a => Substitutable [a] where
 
 -- | Replace all the type variables with its mapping.
 --
--- >>> apply (M.fromList [("a",TVar "x"),("b",TInt)]) (TFun (TVar "a") (TFun (TVar "b") TString))
--- (-> x (-> Int String))
+-- >>> apply (M.fromList [("a",TVar "x"),("b",TInt)]) (TMultiFun [TVar "a",TVar "b",TString])
+-- (-> x Int String)
 --
--- >>> ftvs (TFun (TVar "a") (TFun (TVar "b") TString))
+-- >>> ftvs (TMultiFun [TVar "a",TVar"b",TString])
 -- fromList [a,b]
 --
 instance Substitutable Type where
   apply s (TVar tv) = fromMaybe (TVar tv) (M.lookup tv s)
-  apply s (TFun a r) = TFun (apply s a) (apply s r)
   apply s (TMultiFun vs) = TMultiFun (map (apply s) vs)
   apply s (TList t) = TList (apply s t)
   apply _ t = t
 
   ftvs (TVar tv) = S.singleton (TVar tv)
-  ftvs (TFun a r) = S.union (ftvs a) (ftvs r)
   ftvs (TMultiFun vs) = foldl (\s v -> S.union s (ftvs v)) S.empty vs
   ftvs (TList t) = ftvs t
   ftvs _ = S.empty
@@ -177,13 +174,13 @@ instance Substitutable TypeScheme where
 -- Note that order matters. u1's mapping is applied to u2's mapping, but
 -- not vice-versa.
 --
--- >>> compose (M.fromList [("c", TVar "b")]) (M.fromList [("a", TFun (TVar "b") (TVar "c"))])
+-- >>> compose (M.fromList [("c", TVar "b")]) (M.fromList [("a", TMultiFun [TVar "b",TVar "c"])])
 -- fromList [("a",(-> b b)),("c",b)]
 --
 -- Below composes the wrong way. The resulting Subst is not useful (as the
 -- variables aren't all properly substituted).
 --
--- >>> compose (M.fromList [("a", TFun (TVar "b") (TVar "c"))]) (M.fromList [("c", TVar "b")])
+-- >>> compose (M.fromList [("a", TMultiFun [TVar "b",TVar "c"])]) (M.fromList [("c", TVar "b")])
 -- fromList [("a",(-> b c)),("c",b)]
 --
 compose :: Subst -> Subst -> Subst
@@ -191,7 +188,7 @@ compose u1 u2 = M.union (M.map (apply u1) u2) u1
 
 -- | Compose Substs left-to-right. See 'compose' function for comments.
 --
--- >>> composeAll [(M.fromList [("c", TVar "b")]), (M.fromList [("a", TFun (TVar "b") (TVar "c"))])]
+-- >>> composeAll [(M.fromList [("c", TVar "b")]), (M.fromList [("a", TMultiFun [TVar "b",TVar "c"])])]
 -- fromList [("a",(-> b b)),("c",b)]
 --
 composeAll :: [Subst] -> Subst
@@ -212,22 +209,15 @@ unify TBool TBool = return emptySubst
 unify TString TString = return emptySubst
 unify (TVar tv) t2 = unifyTVar (TVar tv) t2
 unify t1 (TVar tv) = unifyTVar (TVar tv) t1
--- unify (TFun a1 r1) (TFun a2 r2) = do
---   s' <- unify a1 a2
---   s'' <- unify (apply s' r1) (apply s' r2)
---   -- We now have a substitution built from both argument and return types. Substitue
---   -- any remaining type variables.
---   return (composeAll [s'', s'])
-
--- Example:
---
---        (-> a b c) <==> (-> Int String z)
--- TMultiFun [a b c] <==> TMultiFun [Int String z]
---
--- We unify each argument one at a time, composing and applying the new Subst
--- at each step.
---
 unify (TMultiFun as) (TMultiFun bs) =
+  -- Example:
+  --
+  --        (-> a b c) <==> (-> Int String z)
+  -- TMultiFun [a b c] <==> TMultiFun [Int String z]
+  --
+  -- We unify each argument one at a time, composing and applying the new Subst
+  -- at each step.
+  --
   if length as /= length bs
   then throwE $ Mismatch (TMultiFun as) (TMultiFun bs)
   else
@@ -244,7 +234,7 @@ unify (TMultiFun as) (TMultiFun bs) =
       (return emptySubst) (L.zip as bs)
 
 -- Assume order implies attempted function call on a non-function.
-unify t TFun{} = throwE (FunctionExpected t)
+unify t TMultiFun{} = throwE (FunctionExpected t)
 unify t1 t2 = throwE $ Mismatch t1 t2
 
 unifyTVar :: Type -> Type -> TypeCheck Subst
@@ -265,10 +255,10 @@ unifyTVar _ _ = error "Bad call to unifyTVar"
 -- variables are the same, it is OK (it is not infinite, we can just replace 'a'
 -- with any type once we resolve its type)
 --
--- >>> occursCheck (TVar "a") (TFun TInt (TVar "a"))
+-- >>> occursCheck (TVar "a") (TMultiFun [TInt,TVar "a"])
 -- True
 --
--- >>> occursCheck (TVar "a") (TFun TInt (TVar "b"))
+-- >>> occursCheck (TVar "a") (TMultiFun [TInt,TVar "b"])
 -- False
 --
 occursCheck :: Type -> Type -> Bool
@@ -282,7 +272,7 @@ occursCheck tv t = S.member tv (ftvs t)
 -- >>> nonFree (Forall [] (TVar "x"))
 -- fromList [x]
 --
--- >>> nonFree (Forall ["x"] (TFun (TVar "x") (TFun (TVar "y") (TVar "z"))))
+-- >>> nonFree (Forall ["x"] (TMultiFun [TVar "x",TVar "y",TVar "z"]))
 -- fromList [y,z]
 --
 nonFree :: TypeScheme -> S.Set Type
@@ -292,7 +282,7 @@ nonFree (Forall tvs t) =
 
 -- | Find non-universally quantified type variables in the type schemes.
 --
--- >>> nonFrees [(Forall [] (TVar "a")), (Forall ["x"] (TFun (TVar "x") (TFun (TVar "y") (TVar "z"))))]
+-- >>> nonFrees [(Forall [] (TVar "a")), (Forall ["x"] (TMultiFun [TVar "x",TVar "y",TVar "z"]))]
 -- fromList [a,y,z]
 --
 nonFrees :: [TypeScheme] -> S.Set Type
@@ -300,7 +290,7 @@ nonFrees = foldl (\s ts -> s `S.union` nonFree ts) S.empty
 
 -- | Generalize unbounded type variables into a for-all type scheme.
 --
--- >>> generalize (M.fromList [("foo",Forall [] (TVar "a"))]) (M.fromList [("b",TInt)]) (TFun (TVar "a") (TFun (TVar "b") (TVar "c")))
+-- >>> generalize (M.fromList [("foo",Forall [] (TVar "a"))]) (M.fromList [("b",TInt)]) (TMultiFun [TVar "a",TVar "b",TVar "c"])
 -- ∀:["c"] (-> a (-> b c))
 --
 generalize :: TEnv -> Subst -> Type -> TypeScheme
@@ -379,20 +369,6 @@ check tenv s e = case e of
         return (composeAll [s'''', s''', s'', s', s], apply s'''' tT)
       otherT -> throwE $ Mismatch TBool otherT
 
-  NullaryFun body -> check tenv s body
-
-  Fun (Var v) body -> do
-    -- Get fresh type variable for argument variable, and bind the arg var to this
-    -- type var.
-    tv <- getFresh
-    let tenv' = insertTEnv tenv v (toScheme tv)
-    (s', bodyT) <- check tenv' s body
-    -- May have figured out argument's type when body was checked. If not, use the
-    -- fresh we got.
-    return (s', TFun (apply s' tv) bodyT)
-
-  Fun{} -> throwE (GenericTypeError (Just "Function binding must be a variable"))
-
   MultiFun vs body ->
     if not (isListOfVars vs)
       then throwE (GenericTypeError (Just "MultiFun only accepts list of variables"))
@@ -418,14 +394,6 @@ check tenv s e = case e of
      return (s, TMultiFun (tvs' ++ [bodyT]))
 
   NullaryApp body -> check tenv s body
-
---   UnaryApp fn arg -> do
---     (s1, fnT) <- check tenv s fn
---     (s2, argT) <- check tenv s1 arg
---     retT <- getFresh
-
---     s3 <- unify (apply s2 fnT) (apply s2 (TFun argT retT))
---     return (composeAll [s3, s2, s1, s], apply s3 retT)
 
   -- To check the type, build two MultiFun types, one for @fn@ and one for
   -- @body@. Then attempt to unify.
@@ -495,16 +463,16 @@ isListOfVars _ = False
 -- >>> runWithFreshCounter $ reorderTVars (TVar "b")
 -- Right a
 --
--- >>> runWithFreshCounter $ reorderTVars (TFun (TVar "c") (TVar "b"))
+-- >>> runWithFreshCounter $ reorderTVars (TMultiFun [TVar "c",TVar "b"])
 -- Right (-> a b)
 --
--- >>> runWithFreshCounter $ reorderTVars (TFun (TVar "c") (TFun (TFun (TVar "c") (TVar "b")) (TVar "a")))
--- Right (-> a (-> (-> a b) c))
+-- >>> runWithFreshCounter $ reorderTVars (TMultiFun [TVar "c",TMultiFun [TVar "c",TVar "b"],TVar "a"])
+-- Right (-> a (-> a b) c)
 --
--- >>> runWithFreshCounter $ reorderTVars (TFun (TVar "c") (TFun (TList (TVar "c")) (TVar "a")))
+-- >>> runWithFreshCounter $ reorderTVars (TMultiFun [TVar "c",TList (TVar "c"),TVar "a"])
 -- Right (-> a (-> [a] b))
 --
--- >>> runWithFreshCounter $ reorderTVars (TFun (TFun (TVar "b") (TVar "c")) (TFun (TVar "b") (TVar "c")))
+-- >>> runWithFreshCounter $ reorderTVars (TMultiFun [TMultiFun [TVar "b",TVar "c"],TMultiFun [TVar "b",TVar "c"]])
 -- Right (-> (-> a b) (-> a b))
 --
 reorderTVars :: Type -> TypeCheck Type
@@ -512,8 +480,8 @@ reorderTVars t = liftM snd (freshenWithSubst emptySubst (generalize emptyTEnv em
 
 -- | Insert fresh variables for universally-quantified types.
 --
--- >>> runWithFreshCounter (freshen (Forall ["x","y"] (TFun (TVar "x") (TFun (TVar "y") (TVar "c")))))
--- Right (-> a (-> b c))
+-- >>> runWithFreshCounter (freshen (Forall ["x","y"] (MultiFun [TVar "x",TVar "y",TVar "c"]))
+-- Right (-> a b c))
 --
 freshen :: TypeScheme -> TypeCheck Type
 freshen ts = liftM snd (freshenWithSubst emptySubst ts)
@@ -521,7 +489,7 @@ freshen ts = liftM snd (freshenWithSubst emptySubst ts)
 -- | Insert fresh variables for universally-quantified types, given a Subst
 -- context.
 --
--- >>> runWithFreshCounter (freshenWithSubst (M.fromList [("x",TInt)]) (Forall ["x","y"] (TFun (TVar "x") (TFun (TVar "y") (TVar "c")))))
+-- >>> runWithFreshCounter (freshenWithSubst (M.fromList [("x",TInt)]) (Forall ["x","y"] (TMultiFun [TVar "x",TVar "y",TVar "c"])))
 -- Right (fromList [("x",Int),("y",a)],(-> Int (-> a c)))
 --
 freshenWithSubst :: Subst -> TypeScheme -> TypeCheck (Subst, Type)
@@ -533,10 +501,6 @@ freshenWithSubst s (Forall utvs (TVar tv)) =
          ftv <- getFresh
          return (M.insert tv ftv s, ftv)
   else return (s, TVar tv)
-freshenWithSubst s (Forall utvs (TFun a r)) = do
-  (s1, a1) <- freshenWithSubst s (Forall utvs a)
-  (s2, r1) <- freshenWithSubst s1 (Forall utvs r)
-  return (s2, TFun a1 r1)
 
 -- Perhaps this is the simpler solution, compared to below.
 -- freshenWithSubst s (Forall _ (TMultiFun [])) = return (s, TMultiFun [])
@@ -663,7 +627,6 @@ instance Show Type where
   show TInt = "Int"
   show TBool = "Bool"
   show TString = "String"
-  show (TFun a r) = "(-> " ++ show a ++ " " ++ show r ++ ")"
   show (TMultiFun ts) = "(-> " ++ unwords (map show ts) ++ ")"
   show (TList a) = "[" ++ show a ++ "]"
   show (TVar n) = n

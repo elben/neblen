@@ -95,7 +95,7 @@ emitFun _ _ _ = error "Invalid function definition."
 -- "(function (_nbln_incr) { return _nbln_incr(10); })((function (_nbln_x) { return _nbln_x; }))"
 --
 emitLet :: Env -> Exp -> Exp -> Exp -> JSProgram
-emitLet env (Var v) val body = emitUnaryApp env (Fun (Var v) body) val
+-- emitLet env (Var v) val body = emitUnaryApp env (Fun (Var v) body) val
 emitLet _ _ _ _ = "Invalid let definition."
 
 -- | Emit nullary function call.
@@ -104,7 +104,7 @@ emitLet _ _ _ _ = "Invalid let definition."
 --
 emitNullaryApp :: Env -> Exp -> JSProgram
 emitNullaryApp _ (Var fn) = xformVar fn ++ "()"
-emitNullaryApp env (Fun var body) = emitFun env var body ++ "()"
+-- emitNullaryApp env (Fun var body) = emitFun env var body ++ "()"
 emitNullaryApp env expr = emitExp env expr ++ "()"
 
 -- | Emit unary function call.
@@ -113,7 +113,7 @@ emitNullaryApp env expr = emitExp env expr ++ "()"
 --
 emitUnaryApp :: Env -> Exp -> Exp -> JSProgram
 emitUnaryApp env (Var fn) arg = xformVar fn ++ "(" ++ emitExp env arg ++ ")"
-emitUnaryApp env (Fun var body) arg = emitFun env var body ++ "(" ++ emitExp env arg ++ ")"
+-- emitUnaryApp env (Fun var body) arg = emitFun env var body ++ "(" ++ emitExp env arg ++ ")"
 emitUnaryApp env expr arg = emitExp env expr ++ "(" ++ emitExp env arg ++ ")"
 
 -- | Emit vector.
@@ -147,8 +147,8 @@ emitExp _ (Lit v) = emitValue v
 emitExp env (List v) = emitVector env v
 emitExp _ (Var s) = xformVar s
 emitExp env (Def var expr) = emitDef env var expr
-emitExp env (NullaryFun expr) = emitNullaryFun env expr
-emitExp env (Fun var expr) = emitFun env var expr
+-- emitExp env (NullaryFun expr) = emitNullaryFun env expr
+-- emitExp env (Fun var expr) = emitFun env var expr
 emitExp env (UnaryApp fun arg) = emitUnaryApp env fun arg
 emitExp env (NullaryApp fun) = emitNullaryApp env fun
 emitExp env (Let var val body) = emitLet env var val body

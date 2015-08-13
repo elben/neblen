@@ -330,23 +330,11 @@ parseNullaryApp = do
 
 -- | Parse functions.
 --
--- >>> parse parseFun "" "(fn [x] (+ x 123))"
--- Right (Fun (Var "x") (UnaryApp (UnaryApp (Var "+") (Var "x")) (Lit (IntV 123))))
---
--- >>> parse parseFun "" "(fn [x y z] (x y z))"
--- Right (Fun (Var "x") (Fun (Var "y") (Fun (Var "z") (UnaryApp (UnaryApp (Var "x") (Var "y")) (Var "z")))))
---
-parseFun :: Parser Exp
-parseFun = do
-  parseStartsListWith "fn"
-  argsVec <- parseVecOfVars
-  body <- parseBodyOfFun
-  return $ buildFunCurry body argsVec
-
--- | Parse functions.
---
 -- >>> parse parseMultiFun "" "(fn [x y z] (x y z))"
 -- Right (MultiFun [Var "x",Var "y",Var "z"] (UnaryApp (UnaryApp (Var "x") (Var "y")) (Var "z")))
+--
+-- >>> parse parseMultiFun "" "(fn [] 3)"
+-- Right (MultiFun [] (Lit (IntV 3)))
 --
 parseMultiFun :: Parser Exp
 parseMultiFun = do
@@ -367,12 +355,6 @@ parseBodyOfFun = do
   body <- parseExp
   _ <- char ')'
   return body
-
-buildFunCurry :: Exp -> [Exp] -> Exp
-buildFunCurry body [] = NullaryFun body
-buildFunCurry body [Var v] = Fun (Var v) body
-buildFunCurry body (Var v:as) = Fun (Var v) (buildFunCurry body as)
-buildFunCurry _ _ = error "Invalid function argument list."
 
 -- | Parse vector of vars.
 --
