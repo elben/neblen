@@ -47,14 +47,14 @@ subst env expr = case expr of
 
 defaultEnv :: M.Map Name Exp
 defaultEnv = M.fromList [
-  ("+", Fun (Var "a") (Fun (Var "b") (BinOp "+" (Var "a") (Var "b"))))
- ,("-", Fun (Var "a") (Fun (Var "b") (BinOp "-" (Var "a") (Var "b"))))
- ,("*", Fun (Var "a") (Fun (Var "b") (BinOp "*" (Var "a") (Var "b"))))
+  ("+", MultiFun [Var "a",Var "b"] (BinOp "+" (Var "a") (Var "b")))
+ ,("-", MultiFun [Var "a",Var "b"] (BinOp "-" (Var "a") (Var "b")))
+ ,("*", MultiFun [Var "a",Var "b"] (BinOp "*" (Var "a") (Var "b")))
 
- ,("and", Fun (Var "a") (Fun (Var "b") (BinOp "and" (Var "a") (Var "b"))))
- ,("or", Fun (Var "a") (Fun (Var "b") (BinOp "or" (Var "a") (Var "b"))))
- ,("xor", Fun (Var "a") (Fun (Var "b") (BinOp "xor" (Var "a") (Var "b"))))
-  ]
+ ,("and", MultiFun [Var "a",Var "b"] (BinOp "and" (Var "a") (Var "b")))
+ ,("or", MultiFun [Var "a",Var "b"] (BinOp "or" (Var "a") (Var "b")))
+ ,("xor", MultiFun [Var "a",Var "b"] (BinOp "xor" (Var "a") (Var "b")))
+ ]
 
 -- | Evaluates expression.
 --

@@ -585,13 +585,13 @@ getTMultiFunArgs _ = error "not TMultiFun"
 
 defaultTEnv :: M.Map Name TypeScheme
 defaultTEnv = M.fromList [
-  ("+", Forall [] (TFun TInt (TFun TInt TInt)))
- ,("-", Forall [] (TFun TInt (TFun TInt TInt)))
- ,("*", Forall [] (TFun TInt (TFun TInt TInt)))
+  ("+", Forall [] (TMultiFun [TInt,TInt,TInt]))
+ ,("-", Forall [] (TMultiFun [TInt,TInt,TInt]))
+ ,("*", Forall [] (TMultiFun [TInt,TInt,TInt]))
 
- ,("and", Forall [] (TFun TBool (TFun TBool TBool)))
- ,("or", Forall [] (TFun TBool (TFun TBool TBool)))
- ,("xor", Forall [] (TFun TBool (TFun TBool TBool)))
+ ,("and", Forall [] (TMultiFun [TBool,TBool,TBool]))
+ ,("or", Forall [] (TMultiFun [TBool,TBool,TBool]))
+ ,("xor", Forall [] (TMultiFun [TBool,TBool,TBool]))
   ]
 
 emptyTEnv :: TEnv
