@@ -18,7 +18,7 @@ data Exp = Lit Value
          | List [Exp]
          | Var Name          -- ^ Var "x"
          | Def Exp Exp       -- ^ Def (Var "x") Exp
-         | MultiFun [Exp] Exp
+         | Fun [Exp] Exp
          | NullaryApp Exp    -- ^ NullaryApp (Fun or Var)
          | UnaryApp Exp Exp  -- ^ UnaryApp (Fun or Var) (Argument value)
          | Let Exp Exp Exp   -- ^ Let (Var "x") (Value of x) Body.

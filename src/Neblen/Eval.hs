@@ -33,20 +33,20 @@ subst env expr = case expr of
   Lit {} -> expr
   List es -> List (map (subst env) es)
   Var n -> fromMaybe (Var n) (M.lookup n env)
-  MultiFun vs body -> MultiFun vs (subst env body)
+  Fun vs body -> Fun vs (subst env body)
   UnaryApp f e -> UnaryApp (subst env f) (subst env e)
   BinOp f a b -> BinOp f (subst env a) (subst env b)
   e -> e
 
 defaultEnv :: M.Map Name Exp
 defaultEnv = M.fromList [
-  ("+", MultiFun [Var "a",Var "b"] (BinOp "+" (Var "a") (Var "b")))
- ,("-", MultiFun [Var "a",Var "b"] (BinOp "-" (Var "a") (Var "b")))
- ,("*", MultiFun [Var "a",Var "b"] (BinOp "*" (Var "a") (Var "b")))
+  ("+", Fun [Var "a",Var "b"] (BinOp "+" (Var "a") (Var "b")))
+ ,("-", Fun [Var "a",Var "b"] (BinOp "-" (Var "a") (Var "b")))
+ ,("*", Fun [Var "a",Var "b"] (BinOp "*" (Var "a") (Var "b")))
 
- ,("and", MultiFun [Var "a",Var "b"] (BinOp "and" (Var "a") (Var "b")))
- ,("or", MultiFun [Var "a",Var "b"] (BinOp "or" (Var "a") (Var "b")))
- ,("xor", MultiFun [Var "a",Var "b"] (BinOp "xor" (Var "a") (Var "b")))
+ ,("and", Fun [Var "a",Var "b"] (BinOp "and" (Var "a") (Var "b")))
+ ,("or", Fun [Var "a",Var "b"] (BinOp "or" (Var "a") (Var "b")))
+ ,("xor", Fun [Var "a",Var "b"] (BinOp "xor" (Var "a") (Var "b")))
  ]
 
 -- | Evaluates expression.
@@ -64,7 +64,7 @@ eval' env expr = case expr of
 
   List es -> List (map (eval' env) es)
 
-  MultiFun vs e -> MultiFun vs (subst env e)
+  Fun vs e -> Fun vs (subst env e)
 
   NullaryApp e -> eval' env e
 
@@ -77,14 +77,14 @@ eval' env expr = case expr of
     let e' = eval' env e
     case f of
       -- Only one arg left, so do the apply.
-      MultiFun [Var n] fn -> do
+      Fun [Var n] fn -> do
         let env' = M.insert n e' env
         eval' env' fn
 
       -- Curry; apply only one level.
-      MultiFun (Var n:vs) fn -> do
+      Fun (Var n:vs) fn -> do
         let env' = M.insert n e' env
-        eval' env' (MultiFun vs fn)
+        eval' env' (Fun vs fn)
 
       other -> do
         let f' = eval' env other

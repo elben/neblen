@@ -282,7 +282,7 @@ parseDef = try $ do
 -- Right (UnaryApp (UnaryApp (UnaryApp (Var "x") (Lit (IntV 1))) (Lit (IntV 2))) (Lit (IntV 3)))
 --
 -- >>> parse parseUnaryApp "" "((fn [x y z] (+ x y)) 1 2 3)"
--- Right (UnaryApp (UnaryApp (UnaryApp (MultiFun [Var "x",Var "y",Var "z"] (UnaryApp (UnaryApp (Var "+") (Var "x")) (Var "y"))) (Lit (IntV 1))) (Lit (IntV 2))) (Lit (IntV 3)))
+-- Right (UnaryApp (UnaryApp (UnaryApp (Fun [Var "x",Var "y",Var "z"] (UnaryApp (UnaryApp (Var "+") (Var "x")) (Var "y"))) (Lit (IntV 1))) (Lit (IntV 2))) (Lit (IntV 3)))
 --
 parseUnaryApp :: Parser Exp
 parseUnaryApp = try $ do
@@ -330,18 +330,18 @@ parseNullaryApp = do
 
 -- | Parse functions.
 --
--- >>> parse parseMultiFun "" "(fn [x y z] (x y z))"
--- Right (MultiFun [Var "x",Var "y",Var "z"] (UnaryApp (UnaryApp (Var "x") (Var "y")) (Var "z")))
+-- >>> parse parseFun "" "(fn [x y z] (x y z))"
+-- Right (Fun [Var "x",Var "y",Var "z"] (UnaryApp (UnaryApp (Var "x") (Var "y")) (Var "z")))
 --
--- >>> parse parseMultiFun "" "(fn [] 3)"
--- Right (MultiFun [] (Lit (IntV 3)))
+-- >>> parse parseFun "" "(fn [] 3)"
+-- Right (Fun [] (Lit (IntV 3)))
 --
-parseMultiFun :: Parser Exp
-parseMultiFun = do
+parseFun :: Parser Exp
+parseFun = do
   parseStartsListWith "fn"
   argsVec <- parseVecOfVars
   body <- parseBodyOfFun
-  return $ MultiFun argsVec body
+  return $ Fun argsVec body
 
 parseStartsListWith :: String -> Parser ()
 parseStartsListWith keyword = do
@@ -484,7 +484,7 @@ parseExp =
   try parseLet <|>
   try parseUnaryApp <|>
   try parseNullaryApp <|>
-  try parseMultiFun <|>
+  try parseFun <|>
   -- try parseFun <|>
   try parseVar
 
@@ -512,7 +512,7 @@ parseLine = do
 -- Right (UnaryApp (UnaryApp (Var "+") (Lit (IntV 1))) (Lit (IntV 2)))
 --
 -- >>> parseProgram "(fn [x y] (x y))"
--- Right (MultiFun [Var "x",Var "y"] (UnaryApp (Var "x") (Var "y")))
+-- Right (Fun [Var "x",Var "y"] (UnaryApp (Var "x") (Var "y")))
 --
 -- >>> isLeft $ parseProgram "+ 13"
 -- True
