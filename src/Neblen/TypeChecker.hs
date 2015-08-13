@@ -395,8 +395,13 @@ check tenv s e = case e of
 
   MultiFun vs body ->
     if not (isListOfVars vs)
-    then throwE (GenericTypeError (Just "MultiFun only accepts list of variables"))
+      then throwE (GenericTypeError (Just "MultiFun only accepts list of variables"))
     else do
+     -- A function with no arguments would have the type (-> a), or something
+     -- like that. This is a way to hold a lazy value. Scala has Function0, but
+     -- Haskell doesn't have a concept of a function with no arguments, which
+     -- makes sense given Haskell is lazy (it is just the value).
+
      -- Get fresh type variables for every argument variable.
      tvs <- mapM (const getFresh) vs
 
