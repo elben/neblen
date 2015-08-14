@@ -15,7 +15,7 @@ import Neblen.Data
 -- "\"hello\""
 --
 -- This won't type-check, but useful for test.
--- >>> toLisp (List [(Lit (StringV "hello")),(Fun (Var "x") (Var "x")),(UnaryApp (Var "x") (Var "y"))])
+-- >>> toLisp (List [(Lit (StringV "hello")),(Fun [Var "x"] (Var "x")),(UnaryApp (Var "x") (Var "y"))])
 -- "[\"hello\" (fn [x] x) (x y)]"
 --
 -- >>> toLisp (Let (Var "x") (Lit (StringV "hello")) (Var "x"))
@@ -30,7 +30,7 @@ import Neblen.Data
 -- >>> toLisp (NullaryApp (Var "x"))
 -- "(x)"
 --
--- >>> toLisp (NullaryFun (Var "x"))
+-- >>> toLisp (Fun [] (Var "x"))
 -- "(fn [] x)"
 --
 toLisp :: Exp -> String

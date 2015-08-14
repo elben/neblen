@@ -3,6 +3,7 @@
 module Neblen.TypeChecker where
 
 import Neblen.Data
+import Neblen.Utils
 import qualified Data.Map.Strict as M
 import qualified Data.List as L
 import Data.Maybe (fromMaybe)
@@ -212,32 +213,39 @@ unify t1 (TVar tv) = unifyTVar (TVar tv) t1
 
 -- Unify functions.
 --
--- How to unify fns of differing arity:
+-- How functions of differing arity are unified:
 --
 --   * Unify the shared arguments.
---   * Then, unify the return value.
+--   * If un-even remaining arguments, unify remaining as functions again.
+--   * If one of the sides has only one argument left, that argument must be the
+--     return type. Unify that return type with the rest.
 --
 -- Example:
 --
---     (-> Int a b c) <==> (-> d e)
---     d => Int
---     e => (-> a b c)
+--   1. @(-> Int a b c) <==> (-> d e)@
+--   2. @Int@ and @d@ are unified.
+--   3. @(-> a b c) <==> (-> e)@
+--   4. @(-> a b c)@ and @e@ are unified.
+--   5. Unified to @(-> Int (-> a b c))@
 --
-unify (TFun as) (TFun bs) =
-  let minNumArgs = min (length as) (length bs) - 1
-      argsZip    = L.zip (take minNumArgs as) (take minNumArgs bs)
-      restA      = drop minNumArgs as
-      restB      = drop minNumArgs bs
+unify (TFun [l]) (TFun [r]) = unify l r
+unify lhs@(TFun _) (TFun [r]) = unify lhs r
+unify (TFun [l]) rhs@(TFun _) = unify l rhs
+unify (TFun lhs) (TFun rhs) =
+  let numArgs    = min (length lhs) (length rhs) - 1
+      sharedArgs = L.zip (take numArgs lhs) (take numArgs rhs)
+      restL      = drop numArgs lhs
+      restR      = drop numArgs rhs
   in do
-    -- Unify the arguments across lhs and rhs.
+    -- Unify the arguments shared between lhs and rhs
     s <- foldl
-           (\s (a,b) -> do
-             s1 <- unify a b
+           (\s (l,r) -> do
+             s1 <- unify l r
              liftM (compose s1) s)
-           (return emptySubst) argsZip
+           (return emptySubst) sharedArgs
 
-    -- Unify the return value.
-    s' <- unify (TFun (apply s restA)) (TFun (apply s restB))
+    -- Unify remaining args (including return value)
+    s' <- unify (TFun (apply s restL)) (TFun (apply s restR))
     return (s' `compose` s)
 
 -- Assume order implies attempted function call on a non-function.
@@ -325,10 +333,10 @@ checkType e = do
 --
 -- (let [id (fn [x] x)]
 --   (let [y (id 3)]
---     (let [z] (id true) 0)))
+--     (let [z (id true)] z)))
 --
--- >>> runCheck emptyTEnv emptySubst (Let (Var "id") (Fun [Var "x",Var "x"]) (Let (Var "y") (UnaryApp (Var "id") (Lit (IntV 3))) (Let (Var "z") (UnaryApp (Var "id") (Lit (BoolV True))) (Lit (IntV 0)))))
--- (fromList [("b",Int),("c",Int),("d",Bool),("e",Bool)],Int)
+-- >>> runCheck emptyTEnv emptySubst (Let (Var "id") (Fun [Var "x"] (Var "x")) (Let (Var "y") (UnaryApp (Var "id") (Lit (IntV 3))) (Let (Var "z") (UnaryApp (Var "id") (Lit (BoolV True))) (Var "z"))))
+-- (fromList [("b",Int),("c",Int),("d",Bool),("e",Bool)],Bool)
 --
 check :: TEnv -> Subst -> Exp -> TypeCheck (Subst, Type)
 check tenv s e = case e of
@@ -380,7 +388,7 @@ check tenv s e = case e of
   -- doing "lazy" evaluation.
   Fun vs body ->
     if not (isListOfVars vs)
-      then throwE (GenericTypeError (Just "Fun only accepts list of variables"))
+      then throwE (GenericTypeError (Just ("Ill-defined function: " ++ toLisp e)))
     else do
      -- Get fresh type variables for every argument variable.
      tvs <- mapM (const getFresh) vs
@@ -395,9 +403,13 @@ check tenv s e = case e of
      -- new substitution. If not, use the fresh we got.
      let tvs' = map (apply s') tvs
 
-     return (s', TFun (tvs' ++ [bodyT]))
+     return (composeAll [s', s], TFun (tvs' ++ [bodyT]))
 
-  NullaryApp (Fun [] body) -> check tenv s body
+  NullaryApp (Var v) -> do
+    (s1, t) <- check tenv s (Var v)
+    tv <- getFresh
+    s2 <- unify t (TFun [tv])
+    return (composeAll [s2, s1, s], apply s2 tv)
   NullaryApp body -> check tenv s body >>= (throwE . FunctionExpected . snd)
 
   -- To check the type, build two Fun types, one for @fn@ and one for
@@ -438,7 +450,7 @@ isListOfVars _ = False
 -- Right (-> a (-> a b) c)
 --
 -- >>> runWithFreshCounter $ reorderTVars (TFun [TVar "c",TList (TVar "c"),TVar "a"])
--- Right (-> a (-> [a] b))
+-- Right (-> a [a] b)
 --
 -- >>> runWithFreshCounter $ reorderTVars (TFun [TFun [TVar "b",TVar "c"],TFun [TVar "b",TVar "c"]])
 -- Right (-> (-> a b) (-> a b))
@@ -448,8 +460,8 @@ reorderTVars t = liftM snd (freshenWithSubst emptySubst (generalize emptyTEnv em
 
 -- | Insert fresh variables for universally-quantified types.
 --
--- >>> runWithFreshCounter (freshen (Forall ["x","y"] (Fun [TVar "x",TVar "y",TVar "c"]))
--- Right (-> a b c))
+-- >>> runWithFreshCounter (freshen (Forall ["x","y"] (TFun [TVar "x",TVar "y",TVar "c"])))
+-- Right (-> a b c)
 --
 freshen :: TypeScheme -> TypeCheck Type
 freshen ts = liftM snd (freshenWithSubst emptySubst ts)
@@ -458,7 +470,7 @@ freshen ts = liftM snd (freshenWithSubst emptySubst ts)
 -- context.
 --
 -- >>> runWithFreshCounter (freshenWithSubst (M.fromList [("x",TInt)]) (Forall ["x","y"] (TFun [TVar "x",TVar "y",TVar "c"])))
--- Right (fromList [("x",Int),("y",a)],(-> Int (-> a c)))
+-- Right (fromList [("x",Int),("y",a)],(-> Int a c))
 --
 freshenWithSubst :: Subst -> TypeScheme -> TypeCheck (Subst, Type)
 freshenWithSubst s (Forall utvs (TVar tv)) =

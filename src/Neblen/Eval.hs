@@ -68,6 +68,9 @@ eval' env expr = case expr of
 
   -- NullaryApp should only be called on nullary functions.
   NullaryApp (Fun [] body) -> eval' env body
+  NullaryApp (Var v) ->
+    let fn = eval' env (Var v)
+    in eval' env (NullaryApp fn)
   NullaryApp _ -> neblenError expr
 
   -- Two cases for function application:
