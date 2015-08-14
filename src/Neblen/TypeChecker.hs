@@ -239,9 +239,10 @@ unify (TFun lhs) (TFun rhs) =
   in do
     -- Unify the arguments shared between lhs and rhs
     s <- foldl
-           (\s (l,r) -> do
-             s1 <- unify l r
-             liftM (compose s1) s)
+           (\sumSubst (l,r) -> do
+             s <- sumSubst
+             s1 <- unify (apply s l) (apply s r)
+             return $ s1 `compose` s)
            (return emptySubst) sharedArgs
 
     -- Unify remaining args (including return value)

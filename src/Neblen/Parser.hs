@@ -1,9 +1,11 @@
 module Neblen.Parser where
 
 import Neblen.Data
+import Neblen.TypeChecker
 import Text.ParserCombinators.Parsec
 import qualified Control.Applicative as A
 import qualified Data.Set as S
+import Control.Monad
 
 -- $setup
 -- >>> import Data.Either
@@ -220,7 +222,7 @@ parseEmptyList = try (string "()") A.*> A.pure (List [])
 -- Right (List [Lit (IntV 1),Var "abc-xyz",Lit (StringV "abc")])
 --
 parseList' :: Parser Exp
-parseList' = try (string "(list)") A.*> A.pure (List []) <|> try (parseListWithSurroundingPrefix (Just (string "list")) '(' ')' List)
+parseList' = try (string "(list)") A.*> A.pure (List []) <|> try (parseListWithSurroundingPrefix (Just (string "list")) '(' ')' parseExps List)
 
 -- | Parse vectors (which are just lists with different syntax, for now).
 --
@@ -231,25 +233,38 @@ parseList' = try (string "(list)") A.*> A.pure (List []) <|> try (parseListWithS
 -- Right (List [Var "xyz-abc",List [Lit (IntV 0),Lit (StringV "foo"),Lit (BoolV True)]])
 --
 parseVector :: Parser Exp
-parseVector = parseListWithSurrounding '[' ']' List
+parseVector = parseListWithSurrounding '[' ']' parseExps List
+
+-- | Parse many @p@s, separated by at least one space.
+parseMany :: Parser a -> Parser [a]
+parseMany p = sepBy p skipSpaces1
 
 parseExps :: Parser [Exp]
-parseExps = sepBy parseExp skipSpaces1
+parseExps = parseMany parseExp
 
-parseListWithSurroundingPrefix :: Maybe (Parser String) -> Char -> Char -> ([Exp] -> Exp) -> Parser Exp
-parseListWithSurroundingPrefix mp l r f = do
+parseListWithSurroundingPrefix ::
+  Maybe (Parser String)
+  -- ^ Optional prefix parser
+  -> Char -> Char
+  -- ^ Start and begin char
+  -> Parser [a]
+  -- Parse multiple of these things
+  -> ([a] -> a)
+  -- Convert multiple things into one
+  -> Parser a
+parseListWithSurroundingPrefix mp l r ps f = do
   _ <- char l
   case mp of
     Just s -> s A.*> skipSpaces1
     _      -> spaces
 
   -- Must be separated by at least one space
-  exps <- parseExps
+  exps <- ps
 
   _ <- char r
   return $ f exps
 
-parseListWithSurrounding :: Char -> Char -> ([Exp] -> Exp) -> Parser Exp
+parseListWithSurrounding :: Char -> Char -> Parser [a] -> ([a] -> a) -> Parser a
 parseListWithSurrounding = parseListWithSurroundingPrefix Nothing
 
 -- | Parse definition.
@@ -521,3 +536,42 @@ parseLine = do
 -- True
 parseProgram :: NeblenProgram -> Either ParseError Exp
 parseProgram = parse parseLine ""
+
+parseTString :: Parser Type
+parseTString = string "String" >> return TString
+
+parseTBool :: Parser Type
+parseTBool = string "Bool" >> return TBool
+
+parseTInt :: Parser Type
+parseTInt = string "Int" >> return TInt
+
+parseTFun :: Parser Type
+parseTFun = parseListWithSurroundingPrefix (Just (string "->")) '(' ')' parseTypes TFun
+
+parseTList :: Parser Type
+parseTList = do
+  _ <- char '['
+  t <- parseType
+  _ <- char ']'
+  return (TList t)
+
+parseTVar :: Parser Type
+parseTVar = liftM TVar (many1 letter)
+
+-- | Parse type.
+--
+-- >>> parse parseType "" "(-> a Int (-> a b [String] Bool) (-> Bool))"
+-- Right (-> a Int (-> a b [String] Bool) (-> Bool))
+--
+parseType :: Parser Type
+parseType =
+  try parseTString <|>
+  try parseTBool <|>
+  try parseTInt <|>
+  try parseTFun <|>
+  try parseTList <|>
+  try parseTVar
+
+parseTypes :: Parser [Type]
+parseTypes = parseMany parseType

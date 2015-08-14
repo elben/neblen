@@ -3,13 +3,16 @@ module Neblen.TypeChecker.Tests where
 import Test.Framework (Test, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
 import Test.HUnit ((@?=))
+
+import qualified Text.ParserCombinators.Parsec as P
 import Control.Monad.Trans.State
 import Control.Monad.Trans.Except
-
+import Control.Arrow (second)
 import qualified Data.Map.Strict as M
 
 import Neblen.Data
 import Neblen.TypeChecker
+import Neblen.Parser
 
 tests :: Test
 tests = testGroup "Neblen.TypeChecker.Tests" $ concat
@@ -26,60 +29,60 @@ tests = testGroup "Neblen.TypeChecker.Tests" $ concat
     , testCheckIf
     ]
 
+withType :: String -> Type
+withType s =
+  case P.parse parseType "" s of
+    Right t -> t
+    Left _ -> error ("Bad test case. Could not parse type: " ++ show s)
+
+toSubst :: [(TName,String)] -> Subst
+toSubst pairs = M.fromList (map (second withType) pairs)
+
+(<=>) :: String -> String -> [(TName, String)] -> Test
+(<=>) a b pairs =
+  testCase ("unify: " ++ a ++ " <=> " ++ b) $
+  run (unify (withType a) (withType b))
+  @?= toSubst pairs
+
+(<!>) :: String -> String -> TypeError -> Test
+(<!>) a b e =
+  testCase ("unify: " ++ a ++ " <=> " ++ b) $
+  expectE (unify (withType a) (withType b))
+  @?= e
+
+(==>) :: a -> a
+(==>) = id
+
+-- TODO unify funs with differing arity
 testUnify :: [Test]
 testUnify =
   [
-    testCase "unify: Int <=> Int" $
-    run (unify TInt TInt)
-    @?= M.fromList []
+    "Int"  <=> "Int" ==> []
+  , "Int"  <=> "a"   ==> [("a","Int")]
+  , "Bool" <!> "Int" ==> Mismatch TBool TInt
 
-  , testCase "unify: Int <=> a" $
-    run (unify TInt (TVar "a"))
-    @?= M.fromList [("a",TInt)]
+  , "(-> Int Int)" <=> "(-> a b)" ==> [("a","Int"),("b","Int")]
+  , "(-> Int a)"   <=> "(-> a b)" ==> [("a","Int"),("b","Int")]
+  , "(-> Int a)"   <=> "(-> b b)" ==> [("a","Int"),("b","Int")]
 
-  , testCase "unify: (-> Int Int) <=> (-> a b)" $
-    run (unify (TFun [TInt,TInt]) (TFun [TVar "a",TVar "b"]))
-    @?= M.fromList [("a",TInt),("b",TInt)]
+  , "(-> a b)" <=> "(-> a b)" ==> []
+  , "(-> a b)" <=> "(-> b d)" ==> [("a","d"),("b","d")]
+  , "(-> a b)" <=> "(-> c d)" ==> [("a","c"),("b","d")]
 
-  , testCase "unify: (-> Int a) <=> (-> a b)" $
-    run (unify (TFun [TInt,TVar "a"]) (TFun [TVar "a",TVar "b"]))
-    @?= M.fromList [("a",TInt),("b",TInt)]
+  , "(-> a b c d)"   <=> "(-> x y b a)" ==> [("a","x"),("b","y"),("c","y"),("d","x")]
+  , "(-> a b c d e)" <=> "(-> x y b a)" ==> [("a","(-> d e)"),("b","y"),("c","y"),("x","(-> d e)")]
+  , "(-> a b c d)"   <=> "(-> x y)" ==> [("a","x"),("y","(-> b c d)")]
+  , "(-> a b c Int)" <=> "(-> x y)" ==> [("a","x"),("y","(-> b c Int)")]
+  , "(-> a b c Int)" <!> "(-> x y z Bool)" ==> Mismatch TInt TBool
+  , "(-> a b c)"     <!> "(-> x Int)"      ==> Mismatch (TFun [TVar "b",TVar "c"]) TInt
 
-  , testCase "unify: (-> Int a) <=> (-> b b)" $
-    run (unify (TFun [TInt,TVar "a"]) (TFun [TVar "b",TVar "b"]))
-    @?= M.fromList [("a",TInt),("b",TInt)]
+  -- Nullary functions.
+  , "(-> a)" <=> "(-> x)"   ==> [("a","x")]
+  , "(-> a)" <=> "(-> Int)" ==> [("a","Int")]
+  , "(-> Int)" <!> "Int"      ==> Mismatch (TFun [TInt]) TInt
+  , "(-> Int)" <!> "(-> a b)" ==> FunctionExpected TInt
 
-  , testCase "unify: (-> a a) <=> (-> a a)" $
-    run (unify (TFun [TVar "a",TVar "a"]) (TFun [TVar "a",TVar "a"]))
-    @?= M.fromList []
-
-  , testCase "unify: (-> a a) <=> (-> a b)" $
-    run (unify (TFun [TVar "a",TVar "a"]) (TFun [TVar "a",TVar "b"]))
-    @?= M.fromList [("a",TVar "b")]
-
-  , testCase "unify: (-> a b) <=> (-> a b)" $
-    run (unify (TFun [TVar "a",TVar "b"]) (TFun [TVar "a",TVar "b"]))
-    @?= M.fromList []
-
-  , testCase "unify: (-> a b) <=> (-> a c)" $
-    run (unify (TFun [TVar "a",TVar "b"]) (TFun [TVar "a",TVar "c"]))
-    @?= M.fromList [("b",TVar "c")]
-
-  , testCase "unify: (-> a b) <=> (-> c b)" $
-    run (unify (TFun [TVar "a",TVar "b"]) (TFun [TVar "c",TVar "b"]))
-    @?= M.fromList [("a",TVar "c")]
-
-  , testCase "unify: (-> a b) <=> (-> c d)" $
-    run (unify (TFun [TVar "a",TVar "b"]) (TFun [TVar "c",TVar "d"]))
-    @?= M.fromList [("a",TVar "c"),("b",TVar "d")]
-
-  , testCase "unify: Bool <=> Int" $
-    expectE (unify TBool TInt)
-    @?= Mismatch TBool TInt
-
-  , testCase "unify: a <=> (-> a Int)" $
-    expectE (unify (TVar "a") (TFun [TVar "a",TInt]))
-    @?= InfiniteType (TVar "a") (TFun [TVar "a",TInt])
+  , "a" <!> "(-> a Int)" ==> InfiniteType (TVar "a") (TFun [TVar "a",TInt])
   ]
 
 run :: ExceptT TypeError (State FreshCounter) a -> a
