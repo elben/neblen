@@ -209,29 +209,36 @@ unify TBool TBool = return emptySubst
 unify TString TString = return emptySubst
 unify (TVar tv) t2 = unifyTVar (TVar tv) t2
 unify t1 (TVar tv) = unifyTVar (TVar tv) t1
+
+-- Unify functions.
+--
+-- How to unify fns of differing arity:
+--
+--   * Unify the shared arguments.
+--   * Then, unify the return value.
+--
+-- Example:
+--
+--     (-> Int a b c) <==> (-> d e)
+--     d => Int
+--     e => (-> a b c)
+--
 unify (TFun as) (TFun bs) =
-  -- Example:
-  --
-  --        (-> a b c) <==> (-> Int String z)
-  -- TFun [a b c] <==> TFun [Int String z]
-  --
-  -- We unify each argument one at a time, composing and applying the new Subst
-  -- at each step.
-  --
-  if length as /= length bs
-  then throwE $ Mismatch (TFun as) (TFun bs)
-  else
-    -- Zip up both function's argument types. Start with an empty substitution.
-    -- Then, go through each type pair and unify them, composing the resulting
-    -- substitution with the previous one.
-    --
-    -- We do this in the TypeCheck context since `unify` must be called inside
-    -- the fold.
-    foldl
-      (\s (a,b) -> do
-        s1 <- unify a b
-        liftM (compose s1) s)
-      (return emptySubst) (L.zip as bs)
+  let minNumArgs = min (length as) (length bs) - 1
+      argsZip    = L.zip (take minNumArgs as) (take minNumArgs bs)
+      restA      = drop minNumArgs as
+      restB      = drop minNumArgs bs
+  in do
+    -- Unify the arguments across lhs and rhs.
+    s <- foldl
+           (\s (a,b) -> do
+             s1 <- unify a b
+             liftM (compose s1) s)
+           (return emptySubst) argsZip
+
+    -- Unify the return value.
+    s' <- unify (TFun (apply s restA)) (TFun (apply s restB))
+    return (s' `compose` s)
 
 -- Assume order implies attempted function call on a non-function.
 unify t TFun{} = throwE (FunctionExpected t)
@@ -291,7 +298,7 @@ nonFrees = foldl (\s ts -> s `S.union` nonFree ts) S.empty
 -- | Generalize unbounded type variables into a for-all type scheme.
 --
 -- >>> generalize (M.fromList [("foo",Forall [] (TVar "a"))]) (M.fromList [("b",TInt)]) (TFun [TVar "a",TVar "b",TVar "c"])
--- ∀:["c"] (-> a (-> b c))
+-- ∀:["c"] (-> a b c)
 --
 generalize :: TEnv -> Subst -> Type -> TypeScheme
 generalize tenv s t =
@@ -302,7 +309,7 @@ generalize tenv s t =
 -- | Check type and re-order type variables.
 --
 -- (fn [f] (fn [x] (f x))) : (-> (-> a b) (-> a b))
--- >>> runWithFreshCounter (checkType (Fun (Var "f") (Fun (Var "x") (UnaryApp (Var "f") (Var "x")))))
+-- >>> runWithFreshCounter (checkType (Fun [Var "f"] (Fun [Var "x"] (UnaryApp (Var "f") (Var "x")))))
 -- Right (-> (-> a b) (-> a b))
 --
 checkType :: Exp -> TypeCheck Type
@@ -320,7 +327,7 @@ checkType e = do
 --   (let [y (id 3)]
 --     (let [z] (id true) 0)))
 --
--- >>> runCheck emptyTEnv emptySubst (Let (Var "id") (Fun (Var "x") (Var "x")) (Let (Var "y") (UnaryApp (Var "id") (Lit (IntV 3))) (Let (Var "z") (UnaryApp (Var "id") (Lit (BoolV True))) (Lit (IntV 0)))))
+-- >>> runCheck emptyTEnv emptySubst (Let (Var "id") (Fun [Var "x",Var "x"]) (Let (Var "y") (UnaryApp (Var "id") (Lit (IntV 3))) (Let (Var "z") (UnaryApp (Var "id") (Lit (BoolV True))) (Lit (IntV 0)))))
 -- (fromList [("b",Int),("c",Int),("d",Bool),("e",Bool)],Int)
 --
 check :: TEnv -> Subst -> Exp -> TypeCheck (Subst, Type)
@@ -369,15 +376,12 @@ check tenv s e = case e of
         return (composeAll [s'''', s''', s'', s', s], apply s'''' tT)
       otherT -> throwE $ Mismatch TBool otherT
 
+  -- Function may have no arguments (e.g. have type (-> a)), which is a way of
+  -- doing "lazy" evaluation.
   Fun vs body ->
     if not (isListOfVars vs)
       then throwE (GenericTypeError (Just "Fun only accepts list of variables"))
     else do
-     -- A function with no arguments would have the type (-> a), or something
-     -- like that. This is a way to hold a lazy value. Scala has Function0, but
-     -- Haskell doesn't have a concept of a function with no arguments, which
-     -- makes sense given Haskell is lazy (it is just the value).
-
      -- Get fresh type variables for every argument variable.
      tvs <- mapM (const getFresh) vs
 
@@ -391,56 +395,20 @@ check tenv s e = case e of
      -- new substitution. If not, use the fresh we got.
      let tvs' = map (apply s') tvs
 
-     return (s, TFun (tvs' ++ [bodyT]))
+     return (s', TFun (tvs' ++ [bodyT]))
 
-  NullaryApp body -> check tenv s body
+  NullaryApp (Fun [] body) -> check tenv s body
+  NullaryApp body -> check tenv s body >>= (throwE . FunctionExpected . snd)
 
   -- To check the type, build two Fun types, one for @fn@ and one for
   -- @body@. Then attempt to unify.
-  --
-  -- For example, say we have this application:
-  --
-  --   ((fn [x y z] 0) true)
-  --
-  -- There are two parts:
-  --
-  --   (fn [x y z] 0) : (-> a b c Int)
-  --   true           : Bool
-  --
-  -- To unify these, fresh variables are instantiated for the body expression,
-  -- to two types which are then unified:
-  --
-  --   (-> a b c Int) <==> (-> Bool d e f)
-  --   ==> (-> Bool b c Int)
-  --
-  --   ((fn [x y z] 0) true) : (-> b c Int)
-  --
   UnaryApp fn body -> do
     (s1, fnT) <- check tenv s fn
+    (s2, bodyT) <- check tenv s1 body
+    retT <- getFresh
 
-    if not (isTFun fnT)
-    -- Expression in function position not a function; error.
-    then throwE (FunctionExpected fnT)
-    else do
-      -- Find type of body, which is the first argument of the function.
-      (s2, bodyT) <- check tenv s1 body
-
-      -- Get fresh type vars for the remaining arguments.
-      tvs <- replicateM (getNumArgs fnT) getFresh
-
-      s3 <- unify (apply s2 fnT) (apply s2 (TFun (bodyT:tvs)))
-
-      let tvs' = map (apply s3) tvs
-
-      let retT = if length tvs' == 1
-                 -- Was a unary function, so no more functions to return.
-                 -- Return the final result.
-                 then head tvs'
-                 -- Multi-arity function, so curry the rest of the function
-                 -- as the return type.
-                 else TFun tvs'
-
-      return (composeAll [s3, s2, s1, s], retT)
+    s3 <- unify (apply s2 fnT) (apply s2 (TFun (bodyT : [retT])))
+    return (composeAll [s3, s2, s1, s], apply s3 retT)
 
   BinOp{} -> error "Shouldn't need to type check BinOps."
   Def{} -> error "TODO"
@@ -515,9 +483,9 @@ freshenWithSubst s (Forall utvs (TVar tv)) =
 freshenWithSubst s (Forall utvs (TFun vs)) = do
   -- For each argument variable:
   --
-  -- * Grab the previous substitution and the already-freshened type vars list
-  -- * Freshen the current type
-  -- * Append that type to the already-freshened type vars list
+  --   * Grab the previous substitution and the already-freshened type vars list
+  --   * Freshen the current type
+  --   * Append that type to the already-freshened type vars list
   --
   -- For example, if we have @Fun [x y z]@, we will convert @x@ to @a@,
   -- then @y@ to @b@, and so on. This will be built in the list as @[c b a]@.

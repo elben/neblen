@@ -66,7 +66,9 @@ eval' env expr = case expr of
 
   Fun vs e -> Fun vs (subst env e)
 
-  NullaryApp e -> eval' env e
+  -- NullaryApp should only be called on nullary functions.
+  NullaryApp (Fun [] body) -> eval' env body
+  NullaryApp _ -> neblenError expr
 
   -- Two cases for function application:
   --

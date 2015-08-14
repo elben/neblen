@@ -315,6 +315,9 @@ buildAppStack fn (a:as) = buildAppStack (UnaryApp fn a) as
 -- >>> parse parseNullaryApp "" "(+)"
 -- Right (NullaryApp (Var "+"))
 --
+-- >>> parse parseNullaryApp "" "((fn [] 0))"
+-- Right (NullaryApp (Fun [] (Lit (IntV 0))))
+--
 -- >>> parse parseNullaryApp "" "(list)"
 -- Right (NullaryApp (Var "list"))
 --
@@ -324,7 +327,7 @@ buildAppStack fn (a:as) = buildAppStack (UnaryApp fn a) as
 parseNullaryApp :: Parser Exp
 parseNullaryApp = do
   _ <- char '('
-  varOrFn <- parseVar
+  varOrFn <- parseExp
   _ <- char ')'
   return $ NullaryApp varOrFn
 
