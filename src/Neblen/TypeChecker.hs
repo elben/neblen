@@ -410,6 +410,7 @@ check tenv s e = case e of
     tv <- getFresh
     s2 <- unify t (TFun [tv])
     return (composeAll [s2, s1, s], apply s2 tv)
+  NullaryApp (Fun [] body) -> check tenv s body
   NullaryApp body -> check tenv s body >>= (throwE . FunctionExpected . snd)
 
   -- To check the type, build two Fun types, one for @fn@ and one for

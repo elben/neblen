@@ -1,4 +1,4 @@
-module Neblen.Compiler.Tests where
+module Neblen.Parser.Tests where
 
 import Test.Framework (Test, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
@@ -8,10 +8,11 @@ import Control.Monad.Trans.Except
 
 import qualified Data.Map.Strict as M
 
-import Neblen.Compiler
+import Neblen.Parser
+import Neblen.Data
 
 tests :: Test
-tests = testGroup "Neblen.Compiler.Tests" $ concat
+tests = testGroup "Neblen.Parser.Tests" $ concat
     [
     ]
 
