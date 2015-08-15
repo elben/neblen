@@ -328,6 +328,13 @@ checkType e = do
     Right t' -> return t'
     Left err -> throwE err
 
+checkTypeWith :: Exp -> TEnv -> TypeCheck Type
+checkTypeWith e tenv = do
+  (_, t) <- check (M.union defaultTEnv tenv) emptySubst e
+  case evalState (runExceptT (reorderTVars t)) initFreshCounter of
+    Right t' -> return t'
+    Left err -> throwE err
+
 -- | Check type.
 --
 -- Below is:

@@ -29,27 +29,44 @@ tests = testGroup "Neblen.TypeChecker.Tests" $ concat
     , testCheckIf
     ]
 
-withType :: String -> Type
-withType s =
+toType :: String -> Type
+toType s =
   case P.parse parseType "" s of
     Right t -> t
     Left _ -> error ("Bad test case. Could not parse type: " ++ show s)
 
-toSubst :: [(TName,String)] -> Subst
-toSubst pairs = M.fromList (map (second withType) pairs)
+toExp :: String -> Exp
+toExp s =
+  case P.parse parseExp "" s of
+    Right t -> t
+    Left _ -> error ("Bad test case. Could not parse expression: " ++ show s)
 
-(<=>) :: String -> String -> [(TName, String)] -> Test
+toSubst :: [(TName,String)] -> Subst
+toSubst pairs = M.fromList (map (second toType) pairs)
+
+-- | Create unify test with expected Subst.
+(<=>) ::
+  String               -- First type
+  -> String            -- Second type
+  -> [(TName, String)] -- Expected Subst
+  -> Test
 (<=>) a b pairs =
   testCase ("unify: " ++ a ++ " <=> " ++ b) $
-  run (unify (withType a) (withType b))
+  run (unify (toType a) (toType b))
   @?= toSubst pairs
 
-(<!>) :: String -> String -> TypeError -> Test
+-- | Create unify test with expected TypeError.
+(<!>) ::
+  String       -- First type
+  -> String    -- Second type
+  -> TypeError -- Expected error
+  -> Test
 (<!>) a b e =
   testCase ("unify: " ++ a ++ " <=> " ++ b) $
-  expectE (unify (withType a) (withType b))
+  expectE (unify (toType a) (toType b))
   @?= e
 
+-- | Helper method to make tests look nicer.
 (==>) :: a -> a
 (==>) = id
 
@@ -95,148 +112,134 @@ expectE u = case evalState (runExceptT u) initFreshCounter of
           Left e -> e
           Right r -> error $ "Expected error but got: " ++ show r
 
+  -- Designing a new test style:
+  --
+  -- - Do we need to know the resulting Subst? Probably not; we should instead
+  -- make our expressions TEST the Subst by the value returned (e.g. to see what
+  -- the subst ended up as, return a value that takes advantage of that subst).
+  --
+  -- [("b","Bool"),
+  --  ("c","Int")]  :=> "(let [x 0] b)"
+  --                :=: "Bool"
+  --
+  -- "(let [x 0] b)" withEnv [("b","Bool"),
+  --                          ("c","Int")]
+  -- =~> "Bool"
+  --
+  -- "(let [x 0] true)" =~> "Bool"
+
+withEnv ::
+  String
+  -> [(Name,String)]
+  -> String
+  -> Test
+withEnv expr tenv t =
+  testCase ("check: " ++ expr ++ " : " ++ t) $
+  run (checkTypeWith (toExp expr) (M.fromList (map (second (toScheme . toType)) tenv)))
+  @?= toType t
+
+(~~>) :: a -> a
+(~~>) = id
+
+(=~>) ::
+  String
+  -> String
+  -> Test
+(=~>) expr t =
+  testCase ("check: " ++ expr ++ " : " ++ t) $
+  -- snd (run (check emptyTEnv emptySubst (toExp expr)))
+  run (checkType (toExp expr))
+  @?= toType t
+
+(=!>) ::
+  String
+  -> TypeError
+  -> Test
+(=!>) expr err =
+  testCase ("check to error: " ++ expr) $
+  expectE (check emptyTEnv emptySubst (toExp expr))
+  @?= err
+
 testCheckLit :: [Test]
 testCheckLit =
   [
-    testCase "checkLit: int" $
-    run (check emptyTEnv emptySubst (Lit (IntV 0)))
-    @?= (M.fromList [],TInt)
+    "0" `withEnv` []
+    ~~> "Int"
 
-  , testCase "checkLit: bool" $
-    run (check emptyTEnv emptySubst (Lit (BoolV True)))
-    @?= (M.fromList [],TBool)
-
-  , testCase "checkLit: string" $
-    run (check emptyTEnv emptySubst (Lit (StringV "")))
-    @?= (M.fromList [],TString)
+  , "true" =~> "Bool"
+  , "\"\"" =~> "String"
   ]
 
 testCheckVar :: [Test]
 testCheckVar =
   [
-    testCase "checkVar: {x -> Int}: x" $
-    run (check (M.fromList [("x",toScheme TInt)]) emptySubst (Var "x"))
-    @?= (M.fromList [],TInt)
+    "x" `withEnv` [("x","Int")]
+    ~~> "Int"
 
-  , testCase "checkVar: {}: x" $
-    expectE (check emptyTEnv emptySubst (Var "x"))
-    @?= UnboundVariable "x"
+  , "x" =!> UnboundVariable "x"
   ]
 
 testCheckLet :: [Test]
 testCheckLet =
   [
-    testCase "checkLet: (let [x 0] x)" $
-    run (check emptyTEnv emptySubst (Let (Var "x") (Lit (IntV 0)) (Var "x")))
-    @?= (M.fromList [],TInt)
+    "(let [x 0] x)"    =~> "Int"
+  , "(let [x 0] true)" =~> "Bool"
+  , "(let [x (fn [a] a)] (let [y (fn [b c] (b (x 0)))] (let [z (y (fn [z] z))] x)))" =~> "(-> a a)"
+  , "(let [x (fn [a] a)] (let [y (fn [b c] (b (x 0)))] (let [z (y (fn [z] z))] y)))" =~> "(-> (-> Int a) b a)"
+  , "(let [x (fn [a] a)] (let [y (fn [b c] (b (x 0)))] (let [z (y (fn [z] z))] z)))" =~> "(-> a Int)"
+  , "(let [x 0] b)" `withEnv` [("b","Bool")] ~~> "Bool"
 
-  , testCase "checkLet: (let [x 0] true)" $
-    run (check emptyTEnv emptySubst (Let (Var "x") (Lit (IntV 0)) (Lit (BoolV True))))
-    @?= (M.fromList [],TBool)
+  -- let-polymorphism should look up existing type of 'f' when infering 'g'.
+  , "((fn [f] (let [g f] (g 0))) (fn [x] true))" =~> "Bool"
 
-  , testCase "checkLet: {b -> Bool}: (let [x 0] b)" $
-    run (check (M.fromList [("b",toScheme TBool)]) emptySubst (Let (Var "x") (Lit (IntV 0)) (Var "b")))
-    @?= (M.fromList [],TBool)
+  -- let-polymorphism on id function
+  , "(let [id (fn [x] x) y (id 3) z (id true)] z)" =~> "Bool"
+  , "(let [id (fn [x] x) y (id 3) z (id true)] y)" =~> "Int"
+  , "(let [twice (fn [f x] (f (f x))) a (twice (fn [x] 10) 1) b (twice (fn [x] true) false)] a)" =~> "Int"
+  , "(let [twice (fn [f x] (f (f x))) a (twice (fn [x] 10) 1) b (twice (fn [x] true) false)] b)" =~> "Bool"
+  , "(let [twice (fn [f x] (f (f x))) a (twice (fn [x] 10) true)] a)" =!> Mismatch TInt TBool
 
-    -- let-polymorphism should look up existing type of 'f' when infering 'g'.
-  , testCase "checkLet let-polymorphism: ((fn [f] (let [g f] (g 0))) (fn [x] true))" $
-    run (check emptyTEnv emptySubst (UnaryApp (Fun [Var "f"] (Let (Var "g") (Var "f") (UnaryApp (Var "g") (Lit (IntV 0))))) (Fun [Var "x"] (Lit (BoolV True)))))
-    @?= (M.fromList [("a",TFun [TInt,TBool]),("b",TBool),("c",TInt),("d",TBool)],TBool)
+  -- Checks that let-polymorphism doesn't generalize variables that are bound.
+  -- Pierce pg 334.
+  , "((fn [f] (let [g f] (g 0))) (fn [x] (if x x x)))" =!> Mismatch TBool (TVar "c")
 
-  , testCase "checkLet id let-polymorphism: (let [id (fn [x] x), y (id 3), z (id true)] z)" $
-    run (check emptyTEnv emptySubst (Let (Var "id") (Fun [Var "x"] (Var "x")) (Let (Var "y") (UnaryApp (Var "id") (Lit (IntV 3))) (Let (Var "z") (UnaryApp (Var "id") (Lit (BoolV True))) (Var "z")))))
-    @?= (M.fromList [("b",TInt),("c",TInt),("d",TBool),("e",TBool)],TBool)
-
-  , testCase "checkLet let-polymorphism: (let [twice (fn [f x] (f (f x))), a (twice (fn [x] 10) 1), b (twice (fn [x] true) false)] a)" $
-    run (check emptyTEnv emptySubst (Let (Var "twice") (Fun [Var "f"] (Fun [Var "x"] (UnaryApp (Var "f") (UnaryApp (Var "f") (Var "x"))))) (Let (Var "a") (UnaryApp (UnaryApp (Var "twice") (Fun [Var "x"] (Lit (IntV 10)))) (Lit (IntV 1))) (Let (Var "b") (UnaryApp (UnaryApp (Var "twice") (Fun [Var "x"] (Lit (BoolV True)))) (Lit (BoolV True))) (Var "a")))))
-    @?= (M.fromList [("a",TFun [TVar "d",TVar "d"]),("c",TVar "d"),("b",TVar "d"),("e",TInt),("f",TInt),("g",TFun [TInt,TInt]),("h",TInt),("i",TBool),("j",TBool),("k",TFun [TBool,TBool]),("l",TBool)],TInt)
-
-  , testCase "checkLet let-polymorphism: (let [twice (fn [f x] (f (f x))), a (twice (fn [x] 10) true)] a)" $
-    expectE (check emptyTEnv emptySubst (Let (Var "twice") (Fun [Var "f"] (Fun [Var "x"] (UnaryApp (Var "f") (UnaryApp (Var "f") (Var "x"))))) (Let (Var "a") (UnaryApp (UnaryApp (Var "twice") (Fun [Var "x"] (Lit (IntV 10)))) (Lit (IntV 1))) (Let (Var "b") (UnaryApp (UnaryApp (Var "twice") (Fun [Var "x"] (Lit (BoolV True)))) (Lit (IntV 10))) (Var "a")))))
-    @?= Mismatch TBool TInt
-
-    -- Checks that let-polymorphism doesn't generalize variables that are bound.
-    -- Pierce pg 334.
-  , testCase "checkLet let-polymorphism: ((fn [f] (let [g f] (g 0))) (fn [x] (if x x x)))" $
-    expectE (check emptyTEnv emptySubst (UnaryApp (Fun [Var "f"] (Let (Var "g") (Var "f") (UnaryApp (Var "g") (Lit (IntV 0))))) (Fun [Var "x"] (If (Var "x") (Var "x") (Var "x")))))
-    @?= Mismatch TBool (TVar "c")
-
-  , testCase "checkLet: x" $
-    expectE (check emptyTEnv emptySubst (Var "x"))
-    @?= UnboundVariable "x"
   ]
 
 testCheckNullFun :: [Test]
 testCheckNullFun =
   [
-    testCase "checkNullFun" $
-    run (check emptyTEnv emptySubst (Fun [] (Lit (IntV 0))))
-    @?= (M.fromList [],TFun [TInt])
-
-  , testCase "checkNullFun" $
-    expectE (check emptyTEnv emptySubst (Fun [] (Var "x")))
-    @?= UnboundVariable "x"
+    "(fn [] 0)" =~> "(-> Int)"
+  , "(fn [] (fn [] 0))" =~> "(-> (-> Int))"
+  , "(fn [] x)" =!> UnboundVariable "x"
   ]
 
 testCheckFun :: [Test]
 testCheckFun =
   [
-    testCase "checkFun: (fn [x] (fn [y] 0)) : (-> a (-> b Int))" $
-    run (check emptyTEnv emptySubst (Fun [Var "x"] (Fun [Var "y"] (Lit (IntV 0)))))
-    @?= (M.fromList [],TFun [TVar "a",TFun [TVar "b",TInt]])
+    "(fn [x] (fn [y] 0))" =~> "(-> a (-> b Int))"
+  , "(fn [x] (fn [y] x))" =~> "(-> a (-> b a))"
+  , "(fn [x] (x 3))" =~> "(-> (-> Int a) a)"
+  , "(fn [x] (let [z (fn [y] (x 3))] x))" =~> "(-> (-> Int a) (-> Int a))"
+  , "(fn [f] (fn [x] (f x)))" =~> "(-> (-> a b) (-> a b))"
+  , "(fn [f g h] (fn [x y] (f (g (h (y x))))))" =~> "(-> (-> a b) (-> c a) (-> d c) (-> e (-> e d) b))"
 
-  , testCase "checkFun: argument should not override outside scope: x : Bool => (fn [y] (fn [x] 0))" $
-    run (check (M.fromList [("x",toScheme TBool)]) emptySubst (Fun [Var "y"] (Fun [Var "x"] (Lit (IntV 0)))))
-    @?= (M.fromList [],TFun [TVar "a",TFun [TVar "b",TInt]])
-
-  , testCase "checkFun: (fn [x] (fn [y] x)) : (-> a (-> b a))" $
-    run (check emptyTEnv emptySubst (Fun [Var "x"] (Fun [Var "y"] (Var "x"))))
-    @?= (M.fromList [],TFun [TVar "a",TFun [TVar "b",TVar "a"]])
-
-  , testCase "checkFun: (fn [x] (x 3)) : (-> (-> Int a) a)" $
-    run (check emptyTEnv emptySubst (Fun [Var "x"] (UnaryApp (Var "x") (Lit (IntV 3)))))
-    @?= (M.fromList [("a",TFun [TInt,TVar "b"])],TFun [TFun [TInt,TVar "b"],TVar "b"])
-
-  , testCase "checkFun: (fn [x] (let [z (fn [y] (x 3))] x)) : (-> (-> Int a) (-> Int a))" $
-    run (check emptyTEnv emptySubst (Fun [Var "x"] (Let (Var "z") (Fun [Var "y"] (UnaryApp (Var "x") (Lit (IntV 3)))) (Var "x"))))
-    @?= (M.fromList [("a",TFun [TInt,TVar "c"])],TFun [TFun [TInt,TVar "c"],TFun [TInt,TVar "c"]])
-
-  , testCase "checkFun: (fn [a] (fn [x] (a x))) : (-> (-> a b) (-> a b))" $
-    run (check emptyTEnv emptySubst (Fun [Var "a"] (Fun [Var "x"] (UnaryApp (Var "a") (Var "x")))))
-    @?= (M.fromList [("a",TFun [TVar "b",TVar "c"])],TFun [TFun [TVar "b",TVar "c"],TFun [TVar "b",TVar "c"]])
-
-  , testCase "checkFun: (fn [f] (fn [x] (f x))) : (-> (-> a b) (-> a b))" $
-    run (check emptyTEnv emptySubst (Fun [Var "f"] (Fun [Var "x"] (UnaryApp (Var "f") (Var "x")))))
-    @?= (M.fromList [("a",TFun [TVar "b",TVar "c"])],TFun [TFun [TVar "b",TVar "c"],TFun [TVar "b",TVar "c"]])
+  -- Argument should not override outside scope
+  , "((fn [y] (fn [x] y)) x)" `withEnv` [("x","Bool")] ~~> "(-> a Bool)"
 
   -- The "double" function from Pierce (pg 333)
-  , testCase "checkFun: (fn [f] (fn [x] (f (f x)))) : (-> (-> a a) (-> a a))" $
-    run (check emptyTEnv emptySubst (Fun [Var "f"] (Fun [Var "x"] (UnaryApp (Var "f") (UnaryApp (Var "f") (Var "x"))))))
-    @?= (M.fromList [("a",TFun [TVar "d",TVar "d"]),("b",TVar "d"),("c",TVar "d")],TFun [TFun [TVar "d",TVar "d"],TFun [TVar "d",TVar "d"]])
+  , "(fn [f] (fn [x] (f (f x))))" =~> "(-> (-> a a) (-> a a))"
 
-  , testCase "checkFun: (fn [x] x x)" $
-    expectE (check emptyTEnv emptySubst (Fun [Var "x"] (UnaryApp (Var "x") (Var "x"))))
-    @?= InfiniteType (TVar "a") (TFun [TVar "a",TVar "b"])
+  , "(fn [x] (x x))" =!> InfiniteType (TVar "a") (TFun [TVar "a",TVar "b"])
   ]
 
 testCheckNullApp :: [Test]
 testCheckNullApp =
   [
-    testCase "checkNullaryApp: {x => (-> Bool)} (x)" $
-    run (check (M.fromList [("x",toScheme (TFun [TBool]))]) emptySubst (NullaryApp (Var "x")))
-    @?= (M.fromList [("a",TBool)],TBool)
-
-  , testCase "checkNullaryApp: ((fn [] true))" $
-    run (check emptyTEnv emptySubst (NullaryApp (Fun [] (Lit (BoolV True)))))
-    @?= (M.fromList [],TBool)
-
-  , testCase "checkNullaryApp: {x => Bool} (x)" $
-    expectE (check (M.fromList [("x",toScheme TBool)]) emptySubst (NullaryApp (Var "x")))
-    @?= FunctionExpected TBool
-
-  , testCase "checkNullaryApp: (x)" $
-    expectE (check emptyTEnv emptySubst (NullaryApp (Var "x")))
-    @?= UnboundVariable "x"
+    "(x)" `withEnv` [("x","(-> Bool)")] ~~> "Bool"
+  , "((fn [] true))" =~> "Bool"
+  , "(let [f (fn [] 0)] ((fn [f] (f)) f))" =~> "Int"
+  , "(let [x true] (x))" =!> FunctionExpected TBool
+  , "(x)" =!> UnboundVariable "x"
   ]
 
 testCheckUnaryApp :: [Test]
