@@ -43,4 +43,4 @@ doctest -isrc -Wall -fno-warn-type-defaults -fno-warn-unused-do-bind src/Neblen/
 
 [The Typed Racket Guide](http://docs.racket-lang.org/ts-guide/)
 
-[Typing Haskell in Haskell](http://web.cecs.pdx.edu/~mpj/thih/TypingHaskellInHaskell.html#sec-atimonad)
+[Typing Haskell in Haskell](http://web.cecs.pdx.edu/~mpj/thih/TypingHaskellInHaskell.html)
