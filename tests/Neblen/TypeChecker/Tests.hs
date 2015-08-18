@@ -143,12 +143,17 @@ testCheckUnaryApp =
     "(x 0)" ~~> "Bool" `withEnv` [("x","(-> Int Bool)")]
   , "(let [x true] (f x))" ~~> "Bool" `withEnv` [("f","(-> Bool Bool)")]
   , "((fn [x] x) f)" ~~> "(-> Int Bool)" `withEnv` [("f","(-> Int Bool)")]
-  , "(let [x (fn [y] (+ 1 y))] (x 3))" =~> "Int"
   , "((fn [x] (fn [y] x)) 0)" =~> "(-> a Int)"
   , "(((fn [x] (fn [y] x)) 0) true)" =~> "Int"
   , "((fn [x] (x 3)) (fn [x] x))" =~> "Int"
   , "(let [x (fn [y] y)] (x x))" =~> "(-> a a)"
   , "((fn [y] (y 3)) x)" ~~> "Int" `withEnv` [("x","(-> z z)")]
+
+  , "(let [x (fn [y] (+ 1 y))] (x 3))" =~> "Int"
+  , "(let [x (fn [y] (* 2 y))] (x 3))" =~> "Int"
+  , "(let [x (fn [y] (and y true))] (x true))" =~> "Bool"
+  , "(let [x (fn [y] (or y true))] (x true))" =~> "Bool"
+  , "(let [x (fn [y] (xor y true))] (x true))" =~> "Bool"
 
   , "(x 0)" =!> UnboundVariable "x"
   , "(x 0)" ~!> FunctionExpected TInt `withEnv` [("x","Int")]
