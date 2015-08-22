@@ -24,7 +24,44 @@ data Exp = Lit Value
          | Let Exp Exp Exp   -- ^ Let (Var "x") (Value of x) Body.
          | If Exp Exp Exp    -- ^ If (Predicate : Bool) (Then clause) (Else clause)
          | BinOp String Exp Exp
+         | DefDataType Name [TName] [Exp] -- ^ DefDataType Name [TName] [DataCtor]
+         | DataCtor Name [Type]
+         | CtorApp Exp [Exp] -- CtorApp DataCtor [Exp]
   deriving (Show, Eq)
+
+-- Type variable.
+type TName = String
+
+-- | Kinds are the "type of types". They are either monotypes or function kinds.
+-- Kinds are used to check that a type is well-formed.
+--
+-- Examples of monotypes: Int, [Int], Maybe a, EitherT e m a.
+-- Examples of function kinds: [], Maybe, EitherT.
+--
+data Kind = Star
+          | KFun Kind Kind
+          | KUnknown
+  deriving (Eq, Ord)
+
+data Type = TUnit
+          | TInt
+          | TBool
+          | TString
+          | TFun [Type]
+          | TList Type
+          | TVar TName
+
+          -- Stuff with kinds:
+          | TConst TName Kind
+          | TVarK TName Kind -- A type var with a kind
+          | TApp Type Type
+
+  deriving (Eq, Ord) -- Ord for Set functions
+
+-- data Type = TVar TName
+--           | TConst TName
+--           | TApp Type2 Type
+--   deriving (Eq, Ord) -- Ord for Set functions
 
 -- | Symbols that can be part of symbol-only identifiers.
 validIdSymbols :: String
@@ -62,4 +99,22 @@ standardFuns = M.fromList [
   ("_nbln_plus", "function(x) { return function(y) { return x + y; }; };"),
   ("_nbln_minus", "function(x) { return function(y) { return x - y; }; };"),
   ("_nbln_mult", "function(x) { return function(y) { return x * y; }; };")]
+
+instance Show Type where
+  show TUnit = "Unit"
+  show TInt = "Int"
+  show TBool = "Bool"
+  show TString = "String"
+  show (TFun ts) = "(-> " ++ unwords (map show ts) ++ ")"
+  show (TList a) = "[" ++ show a ++ "]"
+  show (TVar n) = n
+  show (TConst n k) = n ++ "<" ++ show k ++ ">"
+  show (TVarK n k) = n ++ "<" ++ show k ++ ">"
+  show (TApp t1 t2) = "(" ++ show t1 ++ " " ++ show t2 ++ ")"
+  -- show (TDataType ts) = "(" ++ unwords (map show ts) ++ ")"
+
+instance Show Kind where
+  show Star = "*"
+  show (KFun k1 k2) = "(" ++ show k1 ++ " -> " ++ show k2 ++ ")"
+  show KUnknown = "?"
 

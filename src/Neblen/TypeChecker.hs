@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module Neblen.TypeChecker where
 
 import Neblen.Data
@@ -99,19 +97,8 @@ type TypeCheck a = ExceptT TypeError (State FreshCounter) a
 -- Mapping of variables (value vars, *not* type variables) to its type.
 type TEnv = M.Map Name TypeScheme
 
--- Type variable.
-type TName = String
-
 -- Type variable substitutions. Mapping of type variables to its type.
 type Subst = M.Map TName Type
-
-data Type = TInt
-          | TBool
-          | TString
-          | TFun [Type]
-          | TList Type
-          | TVar TName
-  deriving (Eq, Ord) -- Ord for Set functions
 
 -- Type schemes is a way to allow let-polymorphism (ML-style polymorphism):
 -- functions can be instantiated with different types in the same body. See
@@ -431,6 +418,28 @@ check tenv s e = case e of
     s3 <- unify (apply s2 fnT) (apply s2 (TFun (bodyT : [retT])))
     return (composeAll [s3, s2, s1, s], apply s3 retT)
 
+  -- TODO:
+  --
+  -- - get fresh type vars for tvs and the ones in ctors, so that they don't
+  --   collide w/ the ones in the current env.
+  --
+  -- - verify the type vars used in ctors are in `tvs`
+  --
+  -- - This returns type Unit, but its constructors needs to be added to the
+  -- TEnv. But how do we do this? We CAN use another env, like a data
+  -- constructor env.
+  --
+  -- Or, assume that data type defs are handled BEFORE type checking. They are a
+  -- top-level construct, so should assume to be correct here.
+  DefDataType n tvs ctors -> return (s, TUnit)
+
+  -- TODO
+  --
+  -- - return a TDataType type
+  DataCtor n ts -> return (s, TUnit)
+
+  CtorApp n exprs -> return (s, TInt)
+
   BinOp{} -> error "Shouldn't need to type check BinOps."
   Def{} -> error "TODO"
 
@@ -611,14 +620,6 @@ runWithFreshCounter e = evalState (runExceptT e) initFreshCounter
 ------------------------------------------
 -- Show instances
 ------------------------------------------
-
-instance Show Type where
-  show TInt = "Int"
-  show TBool = "Bool"
-  show TString = "String"
-  show (TFun ts) = "(-> " ++ unwords (map show ts) ++ ")"
-  show (TList a) = "[" ++ show a ++ "]"
-  show (TVar n) = n
 
 instance Show TypeScheme where
   show (Forall tvs t) = "∀:" ++ show tvs ++ " " ++ show t
