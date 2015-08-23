@@ -1,0 +1,16 @@
+
+;; Hello
+
+(fn [x] x)
+
+(let [x 3] x)
+
+
+;; Y-combinator cannot be typed with our type system! It is for the untyped lambda calculus.
+(let [y-fix  (fn [f]
+               ((fn [x] (f (fn [y] ((x x) y))))
+                (fn [x] (f (fn [y] ((x x) y))))))
+      y-fact (fn [fact]
+               (fn [n] (if (= 0 n) 1 (* n (fact (- n 1))))))]
+  ((y-fix y-fact) 5))
+

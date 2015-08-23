@@ -108,10 +108,9 @@ instance Show Type where
   show (TFun ts) = "(-> " ++ unwords (map show ts) ++ ")"
   show (TList a) = "[" ++ show a ++ "]"
   show (TVar n) = n
-  show (TConst n k) = n ++ "<" ++ show k ++ ">"
-  show (TVarK n k) = n ++ "<" ++ show k ++ ">"
+  show (TConst n _) = n
+  show (TVarK n _) = n
   show (TApp t1 t2) = "(" ++ show t1 ++ " " ++ show t2 ++ ")"
-  -- show (TDataType ts) = "(" ++ unwords (map show ts) ++ ")"
 
 instance Show Kind where
   show Star = "*"
