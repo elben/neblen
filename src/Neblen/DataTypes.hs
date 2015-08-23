@@ -4,6 +4,17 @@ import Neblen.Data
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe)
 
+-- The current problem:
+--
+-- Right now, findKindT doesn't work for this:
+--
+--   data ExceptT e m a = ExceptT (m (Either e a))
+--
+-- Because findKindT will see the TApp m (Either e a), and assign m's kind to *,
+-- even though it should be * -> *.
+--
+-- I think we may need a kind unification for TApp.
+
 -- A place to play with data types implementation
 
 -- Data type declaration is separated out from regular expressions.
@@ -24,16 +35,12 @@ instance HasKind Declare where
 instance HasKind Type where
   kindOf (TConst _ k) = k
   kindOf (TVarK _ k) = k
-  kindOf (TApp t1 t2) = KFun (kindOf t1) (kindOf t2)
+  kindOf (TApp t1 _) = case kindOf t1 of
+                         (KFun _ k) -> k
   kindOf _ = error "One does not ask for the kind of a constructor."
 
-class KindSubstitutable t where
-  kapply :: KEnv -> t -> t
-
-instance KindSubstitutable Type where
-  kapply e (TVarK tv _) = TVarK tv (fromMaybe KUnknown (M.lookup tv e))
-  kapply e (TApp t1 t2) = TApp (kapply e t1) (kapply e t2)
-  kapply _ t = t
+replaceKind :: Type -> Kind -> Type
+replaceKind (TVarK n k) k' = TVarK n k'
 
 -- Data types
 --
@@ -56,7 +63,7 @@ instance KindSubstitutable Type where
 --            (Person String Int))
 --
 dtPerson :: Declare
-dtPerson = DeclareType "Person" [] [DeclareCtor "Person" [TString,TInt]] KUnknown
+dtPerson = DeclareType "Person" [] [DeclareCtor "Person" [TString,TInt]] (KUnknown 0)
 --
 -- Maybe:
 -- (data-type Maybe (a)
@@ -68,17 +75,17 @@ dtPerson = DeclareType "Person" [] [DeclareCtor "Person" [TString,TInt]] KUnknow
 --
 dtMaybe :: Declare
 dtMaybe = DeclareType "Maybe" ["a"] [DeclareCtor "Nothing" [],
-                                     DeclareCtor "Just" [TVarK "a" KUnknown]]
-                      KUnknown
+                                     DeclareCtor "Just" [TVarK "a" (KUnknown 0)]]
+                      (KUnknown 1)
 -- Either:
 -- (data-type Either (a b)
 --            (Left a)
 --            (Right b))
 --
 dtEither :: Declare
-dtEither = DeclareType "Either" ["a","b"] [DeclareCtor "Left"  [TVarK "a" KUnknown],
-                                           DeclareCtor "Right" [TVarK "b" KUnknown]]
-           KUnknown
+dtEither = DeclareType "Either" ["a","b"] [DeclareCtor "Left"  [TVarK "a" (KUnknown 0)],
+                                           DeclareCtor "Right" [TVarK "b" (KUnknown 1)]]
+           (KUnknown 2)
 
 -- (data-type ExceptT (e m a)
 --            (ExceptT (m (Either e a))))
@@ -86,18 +93,18 @@ dtEither = DeclareType "Either" ["a","b"] [DeclareCtor "Left"  [TVarK "a" KUnkno
 dtExceptT :: Declare
 dtExceptT = DeclareType "ExceptT" ["e","m","a"]
                         [DeclareCtor "ExceptT"
-                                  [TApp (TVarK "m" KUnknown)
-                                        (TApp (TApp (TConst "Either" KUnknown) (TVarK "e" KUnknown))
-                                              (TVarK "a" KUnknown))]]
-            KUnknown
+                                  [TApp (TVarK "m" (KUnknown 0))
+                                        (TApp (TApp (TConst "Either" (KUnknown 1)) (TVarK "e" (KUnknown 2)))
+                                              (TVarK "a" (KUnknown 3)))]]
+            (KUnknown 4)
 
 -- (data-type Pair (a b)
 --   (Pair a b))
 --
 dtPair :: Declare
 dtPair = DeclareType "Pair" ["a","b"]
-                     [DeclareCtor "Pair" [TVarK "a" KUnknown,TVarK "b" KUnknown]]
-                     KUnknown
+                     [DeclareCtor "Pair" [TVarK "a" (KUnknown 1),TVarK "b" (KUnknown 2)]]
+                     (KUnknown 3)
 
 dtPair2 :: Declare
 dtPair2 = DeclareType "Pair" ["a","b"]
@@ -114,12 +121,19 @@ funT = (TConst "->" (KFun Star (KFun Star Star)))
 --
 dtState :: Declare
 dtState = DeclareType "State" ["s","a"]
-                      [DeclareCtor "State" [TApp (TConst "->" KUnknown) (TApp (TApp (TConst "Pair" KUnknown) (TVarK "s" KUnknown)) (TVarK "a" KUnknown))]]
-                      KUnknown
-
+                      [DeclareCtor "State"
+                        [TApp (TApp (TConst "->" (KUnknown 0))
+                                    (TVarK "s" (KUnknown 1)))
+                              (TApp (TApp (TConst "Pair" (KUnknown 2)) (TVarK "s" (KUnknown 3)))
+                                    (TVarK "a" (KUnknown 4)))]]
+                      (KUnknown 5)
 dtState2 :: Declare
 dtState2 = DeclareType "State" ["s","a"]
-                       [DeclareCtor "State" [TApp funT (TApp (TApp (TConst "Pair" (KFun Star (KFun Star Star))) (TVarK "s" Star)) (TVarK "a" Star))]]
+                       [DeclareCtor "State"
+                         [TApp (TApp funT
+                                     (TVarK "s" Star))
+                               (TApp (TApp (TConst "Pair" (KFun Star (KFun Star Star))) (TVarK "s" Star))
+                                     (TVarK "a" Star))]]
                        (KFun (KFun Star Star) Star)
 
 -- ===============
@@ -168,8 +182,8 @@ dtExceptT2 = DeclareType "ExceptT" ["e","m","a"]
                                                (TVarK "a" Star))]]
                          (KFun Star (KFun (KFun Star Star) (KFun Star Star)))
 
-dtPersonAnswer :: Declare
-dtPersonAnswer = DeclareType "Person" [] [DeclareCtor "Person" [TString,TInt]] Star
+dtPerson2 :: Declare
+dtPerson2 = DeclareType "Person" [] [DeclareCtor "Person" [TString,TInt]] Star
 
 -- | Mapping of type variable to kind.
 type KEnv = M.Map TName Kind
@@ -192,13 +206,13 @@ type KEnv = M.Map TName Kind
 -- (fromList [("a",*),("e",*),("m",(* -> *))],DeclareType "ExceptT" ["e","m","a"] [DeclareCtor "ExceptT" [(m ((Either e) a))]] (* -> ((* -> *) -> (* -> *))))
 --
 findKind ::
-  -- | Env of known data types.
+  -- Env of known data types.
   KEnv
-  -- | Env for a data type declaration's type variables.
+  -- Env for a data type declaration's type variables.
   -> KEnv
   -> Declare
   -> (KEnv, Declare)
-findKind dtenv _ (DeclareType name tvs exprs KUnknown) =
+findKind dtenv _ (DeclareType name tvs exprs (KUnknown i)) =
   -- Create new kenv for new data types
   --
   -- TODO:
@@ -207,8 +221,7 @@ findKind dtenv _ (DeclareType name tvs exprs KUnknown) =
   --     which tvars it owns, and so that we instantiate fresh ones when we use
   --     the data type
   --
-  --   - Need to find final Kind of data type
-  let kenv = (M.fromList (zip tvs (repeat KUnknown)))
+  let kenv = (M.fromList (zip tvs freshKinds))
       (kenv2, exprs1) = foldl
                           (\(kenvSum, es) e ->
                             let (kenvSum', e') = findKind dtenv kenvSum e
@@ -234,51 +247,24 @@ findKind dtenv kenv (DeclareCtor name types) =
 findKind _ _ _ = error "not a data type declaration thing"
 
 findKindT :: KEnv -> KEnv -> Type -> (KEnv, Type)
-findKindT _ kenv (TVarK name KUnknown) =
+findKindT _ kenv (TVarK name (KUnknown i)) =
   case M.lookup name kenv of
-    Just KUnknown -> (M.insert name Star kenv, TVarK name Star)
-    Just k        -> (kenv, TVarK name k)
-    _             -> error ("Type var " ++ name ++ " is not in the data declaration.")
+    Just (KUnknown j) -> (M.insert name Star kenv, TVarK name Star)
+    Just k            -> (kenv, TVarK name k)
+    _                 -> error ("Type var " ++ name ++ " is not in the data declaration.")
 -- Kind known, just return the type.
 findKindT _ kenv t@(TVarK {}) = (kenv, t)
 
-findKindT dtenv kenv (TConst name KUnknown) =
+findKindT dtenv kenv (TConst name (KUnknown i)) =
   case M.lookup name dtenv of
     Just k -> (kenv, TConst name k)
     Nothing  -> error ("unknown type const: " ++ name)
 -- Kind known, just return the type.
 findKindT dtenv kenv t@(TConst {}) = (kenv, t)
-
--- TODO
---
---   - If it sees a TApp, evaluate the RHS's kind.
---     - Evaluate the LHS's kind. Unify RHS kind with LHS kind (like function
---       unification in the type level)
---       - If LHS's kind is exactly that, good. Return.
---       - If LHS's kind is unknown, set it to RHS-KIND -> *
---       - If LHS's kind is not RHS-KIND -> *, error.
---
--- Example:
---
--- dtExceptT :: Declare
--- dtExceptT = DeclareType "ExceptT" ["e","m","a"]
---                         [DeclareCtor "ExceptT"
---                                   [TApp (TVarK "m" KUnknown)
---                                         (TApp (TApp (TConst "Either" KUnknown) (TVarK "e" KUnknown))
---                                               (TVarK "a" KUnknown))]]
---   Need to discover that m : * -> *.
---
 findKindT dtenv kenv (TApp t1 t2) =
   let (kenv1, t1') = findKindT dtenv kenv t1
       (kenv2, t2') = findKindT dtenv kenv1 t2
   in (kenv2, TApp t1' t2')
-  -- let (kenv1, t1') = findKindT dtenv kenv t1
-  --     (kenv2, t2') = findKindT dtenv kenv1 t2
-  --     kenv3        = unifyKinds t1' (TApp (TVarK "newvar" KUnknown) t2')
-  -- -- TODO do I need to apply kenv and combine them with previous kenvs like
-  -- -- Subst in type checking?
-  -- in (kenv3, TApp (kapply kenv3 t1') (kapply kenv3 t2'))
-
 findKindT _ kenv TInt = (kenv, TConst "Int" Star)
 findKindT _ kenv TBool = (kenv, TConst "Bool" Star)
 findKindT _ kenv TString = (kenv, TConst "String" Star)
@@ -298,12 +284,17 @@ unifyKinds t1 t2 = error $ "can't unify kinds of these types: " ++ show t1 ++ " 
 
 uKinds :: Kind -> Kind -> Kind
 uKinds Star Star = Star
-uKinds Star KUnknown = Star
-uKinds KUnknown Star = Star
+uKinds Star (KUnknown i) = Star
+uKinds (KUnknown i) Star = Star
 uKinds (KFun l1 r1) (KFun l2 r2) = KFun (uKinds l1 r1) (uKinds l2 r2)
-uKinds KUnknown (KFun l2 r2) = KFun (uKinds KUnknown l2) (uKinds KUnknown r2)
-uKinds KUnknown KUnknown = KUnknown
+uKinds (KUnknown i) (KFun l2 r2) = KFun (uKinds (KUnknown i) l2) (uKinds (KUnknown i) r2)
+uKinds (KUnknown i) (KUnknown j) = (KUnknown i)
 uKinds k1 k2 = error ("can't unify kind " ++ show k1 ++ " with " ++ show k2)
+
+-- | Supply of fresh unknown kinds.
+--
+freshKinds :: [Kind]
+freshKinds = map (\(f, i) -> f i) (zip (repeat KUnknown) [0..])
 
 -- More examples:
 data Foo a = Foo (Maybe a)

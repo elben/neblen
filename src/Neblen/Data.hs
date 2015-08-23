@@ -40,7 +40,8 @@ type TName = String
 --
 data Kind = Star
           | KFun Kind Kind
-          | KUnknown
+          -- | Unresolved kind with free variable counter.
+          | KUnknown Int
   deriving (Eq, Ord)
 
 data Type = TUnit
@@ -115,5 +116,5 @@ instance Show Type where
 instance Show Kind where
   show Star = "*"
   show (KFun k1 k2) = "(" ++ show k1 ++ " -> " ++ show k2 ++ ")"
-  show KUnknown = "?"
+  show (KUnknown i) = "k" ++ show i
 
