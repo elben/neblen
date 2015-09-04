@@ -188,21 +188,25 @@ dtPerson2 = DeclareType "Person" [] [DeclareCtor "Person" [TString,TInt]] Star
 -- | Mapping of type variable to kind.
 type KEnv = M.Map TName Kind
 
+-- | Mapping of unknown kind variables to kinds.
+type KSubst = M.Map Int Kind
+
 -- | Find kind.
 --
--- >>> findKind (M.empty) (M.empty) dtPerson
--- (fromList [],DeclareType "Person" [] [DeclareCtor "Person" [String,Int]] *)
+-- >>> findKind (M.empty) (M.empty) (M.empty) dtPerson
+-- (fromList [],fromList [],DeclareType "Person" [] [DeclareCtor "Person" [String,Int]] *)
 --
--- >>> findKind (M.empty) (M.empty) dtMaybe
+-- >>> findKind (M.empty) (M.empty) (M.empty) dtMaybe
 -- (fromList [("a",*)],DeclareType "Maybe" ["a"] [DeclareCtor "Nothing" [],DeclareCtor "Just" [a]] (* -> *))
+-- (fromList [("a",k0)],fromList [],DeclareType "Maybe" ["a"] [DeclareCtor "Nothing" [],DeclareCtor "Just" [a]] (k0 -> *))
 --
--- >>> findKind (M.empty) (M.empty) dtEither
+-- >>> findKind (M.empty) (M.empty) (M.empty) dtEither
 -- (fromList [("a",*),("b",*)],DeclareType "Either" ["a","b"] [DeclareCtor "Left" [a],DeclareCtor "Right" [b]] (* -> (* -> *)))
 --
--- >>> findKind (M.fromList [("->",kindOf funT),("Pair",kindOf dtPair2)]) M.empty dtState
+-- >>> findKind (M.fromList [("->",kindOf funT),("Pair",kindOf dtPair2)]) M.empty (M.empty) dtState
 -- (fromList [("a",*),("s",*)],DeclareType "State" ["s","a"] [DeclareCtor "State" [(-> ((Pair s) a))]] (* -> (* -> *)))
 --
--- >>> findKind (M.fromList [("Either",kindOf dtEither2)]) (M.empty) dtExceptT
+-- >>> findKind (M.fromList [("Either",kindOf dtEither2)]) (M.empty) (M.empty) dtExceptT
 -- (fromList [("a",*),("e",*),("m",(* -> *))],DeclareType "ExceptT" ["e","m","a"] [DeclareCtor "ExceptT" [(m ((Either e) a))]] (* -> ((* -> *) -> (* -> *))))
 --
 findKind ::
@@ -210,9 +214,10 @@ findKind ::
   KEnv
   -- Env for a data type declaration's type variables.
   -> KEnv
+  -> KSubst
   -> Declare
-  -> (KEnv, Declare)
-findKind dtenv _ (DeclareType name tvs exprs (KUnknown i)) =
+  -> (KEnv, KSubst, Declare)
+findKind dtenv kenv ksub (DeclareType name tvs exprs (KUnknown _)) =
   -- Create new kenv for new data types
   --
   -- TODO:
@@ -222,11 +227,11 @@ findKind dtenv _ (DeclareType name tvs exprs (KUnknown i)) =
   --     the data type
   --
   let kenv = (M.fromList (zip tvs freshKinds))
-      (kenv2, exprs1) = foldl
-                          (\(kenvSum, es) e ->
-                            let (kenvSum', e') = findKind dtenv kenvSum e
-                            in (kenvSum', e':es))
-                          (kenv, []) exprs
+      (kenv2, ksub2, exprs1) = foldl
+                          (\(kenvSum, ksubSum, es) e ->
+                            let (kenvSum', ksub', e') = findKind dtenv kenvSum ksubSum e
+                            in (kenvSum', ksub', e':es))
+                          (kenv, ksub, []) exprs
 
       -- Find the data type's kind, using its tv-to-kind mapping.
       dataTypeKind = foldr
@@ -235,39 +240,38 @@ findKind dtenv _ (DeclareType name tvs exprs (KUnknown i)) =
                            Just kind -> KFun kind finalKind
                            _ -> error "type variable should know kind by now")
                        Star tvs
-  in (kenv2, DeclareType name tvs (reverse exprs1) dataTypeKind)
+  in (kenv2, ksub, DeclareType name tvs (reverse exprs1) dataTypeKind)
 
-findKind dtenv kenv (DeclareCtor name types) =
-  let (kenv', ts1) = foldl
-                       (\(kenvSum, ts) t ->
-                         let (kenvSum', t') = findKindT dtenv kenvSum t
-                         in (kenvSum', t':ts))
-                       (kenv, []) types
-  in (kenv', DeclareCtor name (reverse ts1))
-findKind _ _ _ = error "not a data type declaration thing"
+findKind dtenv kenv ksub (DeclareCtor name types) =
+  let (kenv', ksub2, ts1) = foldl
+                       (\(kenvSum, ksubSum, ts) t ->
+                         let (kenvSum', ksub', t') = findKindT dtenv kenvSum ksubSum t
+                         in (kenvSum', ksub', t':ts))
+                       (kenv, ksub, []) types
+  in (kenv', ksub2, DeclareCtor name (reverse ts1))
+findKind _ _ _ _ = error "not a data type declaration thing"
 
-findKindT :: KEnv -> KEnv -> Type -> (KEnv, Type)
-findKindT _ kenv (TVarK name (KUnknown i)) =
+findKindT :: KEnv -> KEnv -> KSubst -> Type -> (KEnv, KSubst, Type)
+findKindT _ kenv ksub (TVarK name (KUnknown _)) =
   case M.lookup name kenv of
-    Just (KUnknown j) -> (M.insert name Star kenv, TVarK name Star)
-    Just k            -> (kenv, TVarK name k)
+    Just k            -> (kenv, ksub, TVarK name k)
     _                 -> error ("Type var " ++ name ++ " is not in the data declaration.")
 -- Kind known, just return the type.
-findKindT _ kenv t@(TVarK {}) = (kenv, t)
+findKindT _ kenv ksub t@(TVarK {}) = (kenv, ksub, t)
 
-findKindT dtenv kenv (TConst name (KUnknown i)) =
+findKindT dtenv kenv ksub (TConst name (KUnknown _)) =
   case M.lookup name dtenv of
-    Just k -> (kenv, TConst name k)
+    Just k -> (kenv, ksub, TConst name k)
     Nothing  -> error ("unknown type const: " ++ name)
 -- Kind known, just return the type.
-findKindT dtenv kenv t@(TConst {}) = (kenv, t)
-findKindT dtenv kenv (TApp t1 t2) =
-  let (kenv1, t1') = findKindT dtenv kenv t1
-      (kenv2, t2') = findKindT dtenv kenv1 t2
-  in (kenv2, TApp t1' t2')
-findKindT _ kenv TInt = (kenv, TConst "Int" Star)
-findKindT _ kenv TBool = (kenv, TConst "Bool" Star)
-findKindT _ kenv TString = (kenv, TConst "String" Star)
+findKindT _ kenv ksub t@(TConst {}) = (kenv, ksub, t)
+findKindT dtenv kenv ksub (TApp t1 t2) =
+  let (kenv1, ksub1, t1') = findKindT dtenv kenv ksub t1
+      (kenv2, ksub2, t2') = findKindT dtenv kenv1 ksub1 t2
+  in (kenv2, ksub2, TApp t1' t2')
+findKindT _ kenv ksub TInt = (kenv, ksub, TConst "Int" Star)
+findKindT _ kenv ksub TBool = (kenv, ksub, TConst "Bool" Star)
+findKindT _ kenv ksub TString = (kenv, ksub, TConst "String" Star)
 
 -- | Unify types and their kinds. Should this just be in the type unifier?
 --
