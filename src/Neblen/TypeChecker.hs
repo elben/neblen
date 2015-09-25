@@ -113,8 +113,6 @@ data TypeError = Mismatch Type Type
                | GenericTypeError (Maybe String)
   deriving (Eq)
 
-newtype FreshCounter = FreshCounter { getFreshCounter :: Int }
-
 -- Something is Substitutable if you can apply the given Subst to it, substituting
 -- type variables in 't' with its mapping in the Subst.
 class Substitutable t where
@@ -597,9 +595,6 @@ emptyGenericTypeError = GenericTypeError Nothing
 
 genericTypeError :: String -> TypeError
 genericTypeError msg = GenericTypeError (Just msg)
-
-initFreshCounter :: FreshCounter
-initFreshCounter = FreshCounter { getFreshCounter = 0 }
 
 ------------------------------------------
 -- Helpers to run the monad transformers.

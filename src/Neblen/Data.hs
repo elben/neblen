@@ -59,6 +59,11 @@ data Type = TUnit
 
   deriving (Eq, Ord) -- Ord for Set functions
 
+newtype FreshCounter = FreshCounter { getFreshCounter :: Int }
+
+initFreshCounter :: FreshCounter
+initFreshCounter = FreshCounter { getFreshCounter = 0 }
+
 -- data Type = TVar TName
 --           | TConst TName
 --           | TApp Type2 Type

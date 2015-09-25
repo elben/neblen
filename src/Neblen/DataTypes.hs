@@ -2,6 +2,7 @@ module Neblen.DataTypes where
 
 import Neblen.Data
 import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import Data.Maybe (fromMaybe)
 
 -- The current problem:
@@ -185,11 +186,38 @@ dtExceptT2 = DeclareType "ExceptT" ["e","m","a"]
 dtPerson2 :: Declare
 dtPerson2 = DeclareType "Person" [] [DeclareCtor "Person" [TString,TInt]] Star
 
--- | Mapping of type variable to kind.
+-- TODO can eventually combine as `Substitutable a t`?
+class KSubstitutable k where
+  kapply :: KSubst -> k -> k
+
+-- | Mapping of type variable (from TVarK) to kind.
 type KEnv = M.Map TName Kind
 
 -- | Mapping of unknown kind variables to kinds.
 type KSubst = M.Map Int Kind
+
+instance KSubstitutable Kind where
+  kapply _ Star = Star
+  kapply ksub (KFun k1 k2) = KFun (kapply ksub k1) (kapply ksub k2)
+  kapply ksub (KUnknown i) = fromMaybe (KUnknown i) (M.lookup i ksub)
+
+instance KSubstitutable Declare where
+  kapply ksub (DeclareType name tvs ctors kind) = DeclareType name tvs (map (kapply ksub) ctors) (kapply ksub kind)
+  kapply ksub (DeclareCtor name types) = DeclareCtor name (map (kapply ksub) types)
+
+instance KSubstitutable Type where
+  kapply ksub (TConst name kind) = TConst name (kapply ksub kind)
+  kapply ksub (TVarK name kind) = TVarK name (kapply ksub kind)
+  kapply ksub (TApp t1 t2) = TApp (kapply ksub t1) (kapply ksub t2)
+  kapply _ t = t
+
+-- | Compose KSubst, applying @ksub1@'s substitutions over values of @ksub2@.
+--
+composeKSubst :: KSubst -> KSubst -> KSubst
+composeKSubst ksub1 ksub2 = M.union (M.map (kapply ksub1) ksub2) ksub1
+
+-- instance KSubstitutable KSubst Kind where
+--   apply :: 
 
 -- | Find kind.
 --
