@@ -62,7 +62,10 @@ data Type = TUnit
 newtype FreshCounter = FreshCounter { getFreshCounter :: Int }
 
 initFreshCounter :: FreshCounter
-initFreshCounter = FreshCounter { getFreshCounter = 0 }
+initFreshCounter = initFreshCounterAt 0
+
+initFreshCounterAt :: Int -> FreshCounter
+initFreshCounterAt i = FreshCounter { getFreshCounter = i }
 
 -- data Type = TVar TName
 --           | TConst TName

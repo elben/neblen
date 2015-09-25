@@ -2,27 +2,12 @@ module Neblen.DataTypes where
 
 import Neblen.Data
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 import Data.Maybe (fromMaybe)
+import Control.Monad.Trans.State
 
--- The current problem:
+-- | Data type declarations. Separated out from regular expressions.
 --
--- Right now, findKindT doesn't work for this:
---
---   data ExceptT e m a = ExceptT (m (Either e a))
---
--- Because findKindT will see the TApp m (Either e a), and assign m's kind to *,
--- even though it should be * -> *.
---
--- I think we may need a kind unification for TApp.
-
--- A place to play with data types implementation
-
--- Data type declaration is separated out from regular expressions.
---
-data Declare =
-             -- DeclareType Name [TName] [DeclareCtor] Kind
-               DeclareType Name [TName] [Declare] Kind
+data Declare = DeclareType Name [TName] [Declare] Kind
              | DeclareCtor Name [Type]
   deriving (Show, Eq, Ord)
 
@@ -137,6 +122,165 @@ dtState2 = DeclareType "State" ["s","a"]
                                      (TVarK "a" Star))]]
                        (KFun (KFun Star Star) Star)
 
+-- Recursive data type:
+data Tree a = Leaf a
+            | Branch (Tree a) (Tree a)
+
+dtTree :: Declare
+dtTree = DeclareType "Tree" ["a"]
+                     [DeclareCtor "Leaf" [TVarK "a" (KUnknown 0)],
+                      DeclareCtor "Branch" [TApp (TConst "Tree" (KUnknown 1)) (TVarK "a" (KUnknown 0)),
+                                            TApp (TConst "Tree" (KUnknown 1)) (TVarK "a" (KUnknown 0))]]
+                     (KUnknown 1)
+
+-- Foo :: (* -> * -> *) -> * -> * -> *
+--
+data Dallas a b c d e =  Dallas (a (b c) d e)
+--
+dtFoo :: Declare
+dtFoo = DeclareType "Foo" ["a","b","c","d"]
+          [DeclareCtor "Foo"
+            [TApp (TApp (TApp (TVarK "a" (KUnknown 0))
+                              (TApp (TVarK "b" (KUnknown 1)) (TVarK "c" (KUnknown 2))))
+                        (TVarK "d" (KUnknown 3)))
+                  (TVarK "e" (KUnknown 4))]]
+          (KUnknown 5)
+
+foo = Dallas
+
+-- | Mapping of data type constant to kind. (e.g. Left : KFun KStar KStar)
+type KConstEnv = M.Map TName Kind
+
+type KindCheck a = State FreshCounter a
+
+-- TODO
+-- Game plan:
+--
+-- - Call evalKind for each ctor, passing in the new kenv and ksub every go-round.
+-- - At the end, you have a kenv and ksub ready to go. Call a "substitute"
+--   method that replaces all of unknowns with stars.
+-- - Then, we need to return a new DeclareType with the kinds filled in
+evalDataTypeKind :: KConstEnv -> KEnv -> Declare -> KindCheck (KEnv, Declare)
+evalDataTypeKind cenv kenv declare@(DeclareType name tvs ctors kind) = do
+  (kenv2, ksub2) <- foldl (\kindCheck ctor -> do
+                               (kenv', ksub') <- kindCheck
+                               (kenv'', ksub'') <- evalKind cenv kenv' ksub' ctor
+                               return (kenv'', ksub'' `composeKSubst` ksub'))
+                         (return (kenv, M.empty)) ctors
+  -- TODO:
+  --  - as we are replacing the unknown kind vars with stars, we need to
+  --  remember the mapping so that we know the final kind of this data type. But
+  --  kapply doesn't return a KEnv. So how?
+  return (kenv2, kapply ksub2 declare)
+evalDataTypeKind cenv kenv _ = error "Should only be called for top-level data type declaration."
+
+-- | Evaluate the kind of a data constructor.
+--
+evalKind :: KConstEnv -> KEnv -> KSubst -> Declare -> KindCheck (KEnv, KSubst)
+evalKind cenv kenv ksub (DeclareCtor name types) = return (kenv, ksub)
+  -- As we go through each type, getting new KEnv and KSubst, apply and merge
+  -- these envs together.
+evalKind cenv kenv ksub (DeclareType {}) = error "Should not be called on DeclareTypes"
+
+-- | Evaluate kind of type.
+--
+-- >>> evalState (evalKindOfType M.empty M.empty M.empty (TVarK "a" (KUnknown 0))) (initFreshCounterAt 10)
+-- (fromList [("a",k0)],fromList [],k0)
+--
+-- >>> evalState (evalKindOfType (M.fromList [("Foo", KUnknown 0)]) M.empty M.empty (TConst "Foo" (KUnknown 0))) (initFreshCounterAt 10)
+-- (fromList [],fromList [],k0)
+--
+-- For below, we have:
+--
+--   KEnv:
+--   a : 0
+--   b : 1
+--
+--   KSubst:
+--   empty
+--
+-- Expected result:
+--
+--   KEnv:
+--   a : 1 -> 10
+--   b : 1
+--
+--   KSubst:
+--   0 : 1 -> 10
+--
+-- >>> evalState (evalKindOfType M.empty (M.fromList [("a",KUnknown 0), ("b",KUnknown 1)]) M.empty (TApp (TVarK "a" (KUnknown 0)) (TVarK "b" (KUnknown 1)))) (initFreshCounterAt 10)
+-- (fromList [("a",(k1 -> k10)),("b",k1)],fromList [(0,(k1 -> k10))],k10)
+--
+-- For below, we have:
+--
+--   KEnv:
+--   a : 0
+--   b : 1
+--   c : 2
+--   d : 3
+--   e : 4
+--
+--   KSubst:
+--   empty
+--
+-- Expected results:
+--
+--   KEnv:
+--   a : 10 -> (3 -> 12)
+--   b : 2 -> 10
+--   c : 2
+--   d : 3
+--   e : 4
+--
+--   KSubst:
+--   0 : 10 -> (3 -> 12)
+--   1 : 2 -> 10
+--   11: 3 -> 12
+--
+-- >>> evalState (evalKindOfType M.empty (M.fromList [("a",KUnknown 0), ("b",KUnknown 1), ("c",KUnknown 2), ("d",KUnknown 3), ("e",KUnknown 4)]) M.empty (TApp (TApp (TVarK "a" (KUnknown 0)) (TApp (TVarK "b" (KUnknown 1)) (TVarK "c" (KUnknown 2)))) (TVarK "d" (KUnknown 3)))) (initFreshCounterAt 10)
+-- (fromList [("a",(k10 -> (k3 -> k12))),("b",(k2 -> k10)),("c",k2),("d",k3),("e",k4)],fromList [(0,(k10 -> (k3 -> k12))),(1,(k2 -> k10)),(11,(k3 -> k12))],k12)
+--
+evalKindOfType :: KConstEnv -> KEnv -> KSubst -> Type -> KindCheck (KEnv, KSubst, Kind)
+evalKindOfType cenv kenv ksub (TVarK tv (KUnknown kv)) = return (M.insert tv (KUnknown kv) kenv, ksub, KUnknown kv)
+evalKindOfType cenv kenv ksub (TConst name k) =
+  if M.member name cenv
+  then return (kenv, ksub, k)
+  else error ("Unknown TConst: " ++ show (TConst name k))
+
+evalKindOfType cenv kenv ksub (TApp t1 t2) = do
+  (kenv1, ksub1, k1) <- evalKindOfType cenv kenv ksub t1
+  (kenv2, ksub2, k2) <- evalKindOfType cenv kenv1 (ksub1 `composeKSubst` ksub) t2
+  kv <- nextFreshCounter >>= return . KUnknown
+  let ksub3 = (M.fromList [(getKindVar k1,KFun k2 kv)]) `composeKSubst` ksub2 `composeKSubst` ksub1
+  return (M.map (kapply ksub3) kenv2, ksub3 `composeKSubst` ksub3, kv)
+
+evalKindOfType _ kenv ksub TInt = return (kenv, ksub, Star)
+evalKindOfType _ kenv ksub TBool = return (kenv, ksub, Star)
+evalKindOfType _ kenv ksub TString = return (kenv, ksub, Star)
+
+getKindVar :: Kind -> Int
+getKindVar (KUnknown i) = i
+
+nextFreshCounter :: KindCheck Int
+nextFreshCounter = do
+  s <- get -- Same as: ExceptT (liftM Right get)
+  put s{getFreshCounter = getFreshCounter s + 1}
+  return $ getFreshCounter s
+
+--
+-- Kind unification:
+-- https://github.com/purescript/purescript/blob/master/src/Language/PureScript/TypeChecker/Kinds.hs#L58
+--
+-- Purescript uses KUnknown with generated integer as "kind variables":
+-- https://github.com/purescript/purescript/blob/master/src/Language/PureScript/Kinds.hs#L33
+--
+-- (=:=): https://github.com/purescript/purescript/blob/master/src/Control/Monad/Unify.hs#L120
+--
+-- Has idea of converting all unknown kinds to Star at the end:
+-- https://github.com/purescript/purescript/blob/master/src/Language/PureScript/TypeChecker/Kinds.hs#L149
+--
+--
+
 -- ===============
 -- Kind finder
 -- ===============
@@ -215,91 +359,6 @@ instance KSubstitutable Type where
 --
 composeKSubst :: KSubst -> KSubst -> KSubst
 composeKSubst ksub1 ksub2 = M.union (M.map (kapply ksub1) ksub2) ksub1
-
--- instance KSubstitutable KSubst Kind where
---   apply :: 
-
--- | Find kind.
---
--- >>> findKind (M.empty) (M.empty) (M.empty) dtPerson
--- (fromList [],fromList [],DeclareType "Person" [] [DeclareCtor "Person" [String,Int]] *)
---
--- >>> findKind (M.empty) (M.empty) (M.empty) dtMaybe
--- (fromList [("a",*)],DeclareType "Maybe" ["a"] [DeclareCtor "Nothing" [],DeclareCtor "Just" [a]] (* -> *))
--- (fromList [("a",k0)],fromList [],DeclareType "Maybe" ["a"] [DeclareCtor "Nothing" [],DeclareCtor "Just" [a]] (k0 -> *))
---
--- >>> findKind (M.empty) (M.empty) (M.empty) dtEither
--- (fromList [("a",*),("b",*)],DeclareType "Either" ["a","b"] [DeclareCtor "Left" [a],DeclareCtor "Right" [b]] (* -> (* -> *)))
---
--- >>> findKind (M.fromList [("->",kindOf funT),("Pair",kindOf dtPair2)]) M.empty (M.empty) dtState
--- (fromList [("a",*),("s",*)],DeclareType "State" ["s","a"] [DeclareCtor "State" [(-> ((Pair s) a))]] (* -> (* -> *)))
---
--- >>> findKind (M.fromList [("Either",kindOf dtEither2)]) (M.empty) (M.empty) dtExceptT
--- (fromList [("a",*),("e",*),("m",(* -> *))],DeclareType "ExceptT" ["e","m","a"] [DeclareCtor "ExceptT" [(m ((Either e) a))]] (* -> ((* -> *) -> (* -> *))))
---
-findKind ::
-  -- Env of known data types.
-  KEnv
-  -- Env for a data type declaration's type variables.
-  -> KEnv
-  -> KSubst
-  -> Declare
-  -> (KEnv, KSubst, Declare)
-findKind dtenv kenv ksub (DeclareType name tvs exprs (KUnknown _)) =
-  -- Create new kenv for new data types
-  --
-  -- TODO:
-  --
-  --   - Each data type declaration needs to be in a "Forall" so that it knows
-  --     which tvars it owns, and so that we instantiate fresh ones when we use
-  --     the data type
-  --
-  let kenv = (M.fromList (zip tvs freshKinds))
-      (kenv2, ksub2, exprs1) = foldl
-                          (\(kenvSum, ksubSum, es) e ->
-                            let (kenvSum', ksub', e') = findKind dtenv kenvSum ksubSum e
-                            in (kenvSum', ksub', e':es))
-                          (kenv, ksub, []) exprs
-
-      -- Find the data type's kind, using its tv-to-kind mapping.
-      dataTypeKind = foldr
-                       (\tv finalKind ->
-                         case M.lookup tv kenv2 of
-                           Just kind -> KFun kind finalKind
-                           _ -> error "type variable should know kind by now")
-                       Star tvs
-  in (kenv2, ksub, DeclareType name tvs (reverse exprs1) dataTypeKind)
-
-findKind dtenv kenv ksub (DeclareCtor name types) =
-  let (kenv', ksub2, ts1) = foldl
-                       (\(kenvSum, ksubSum, ts) t ->
-                         let (kenvSum', ksub', t') = findKindT dtenv kenvSum ksubSum t
-                         in (kenvSum', ksub', t':ts))
-                       (kenv, ksub, []) types
-  in (kenv', ksub2, DeclareCtor name (reverse ts1))
-findKind _ _ _ _ = error "not a data type declaration thing"
-
-findKindT :: KEnv -> KEnv -> KSubst -> Type -> (KEnv, KSubst, Type)
-findKindT _ kenv ksub (TVarK name (KUnknown _)) =
-  case M.lookup name kenv of
-    Just k            -> (kenv, ksub, TVarK name k)
-    _                 -> error ("Type var " ++ name ++ " is not in the data declaration.")
--- Kind known, just return the type.
-findKindT _ kenv ksub t@(TVarK {}) = (kenv, ksub, t)
-
-findKindT dtenv kenv ksub (TConst name (KUnknown _)) =
-  case M.lookup name dtenv of
-    Just k -> (kenv, ksub, TConst name k)
-    Nothing  -> error ("unknown type const: " ++ name)
--- Kind known, just return the type.
-findKindT _ kenv ksub t@(TConst {}) = (kenv, ksub, t)
-findKindT dtenv kenv ksub (TApp t1 t2) =
-  let (kenv1, ksub1, t1') = findKindT dtenv kenv ksub t1
-      (kenv2, ksub2, t2') = findKindT dtenv kenv1 ksub1 t2
-  in (kenv2, ksub2, TApp t1' t2')
-findKindT _ kenv ksub TInt = (kenv, ksub, TConst "Int" Star)
-findKindT _ kenv ksub TBool = (kenv, ksub, TConst "Bool" Star)
-findKindT _ kenv ksub TString = (kenv, ksub, TConst "String" Star)
 
 -- | Unify types and their kinds. Should this just be in the type unifier?
 --
