@@ -1,5 +1,142 @@
 module Neblen.DataTypes2 where
 
+import Neblen.Data
+import Neblen.DataTypes
+
+-- Kind unification:
+-- https://github.com/purescript/purescript/blob/master/src/Language/PureScript/TypeChecker/Kinds.hs#L58
+--
+-- Purescript uses KUnknown with generated integer as "kind variables":
+-- https://github.com/purescript/purescript/blob/master/src/Language/PureScript/Kinds.hs#L33
+--
+-- (=:=): https://github.com/purescript/purescript/blob/master/src/Control/Monad/Unify.hs#L120
+--
+-- Has idea of converting all unknown kinds to Star at the end:
+-- https://github.com/purescript/purescript/blob/master/src/Language/PureScript/TypeChecker/Kinds.hs#L149
+--
+--
+
+
+-- Data types
+--
+-- Data types can only be declared at the top level.
+--
+-- ===============
+-- Parsing
+-- ===============
+--
+-- First, we need to parse the data type declaration into something that we
+-- can work with. When you declare a data type, you're declaring:
+--
+--   - Its name (e.g. Maybe)
+--   - What its constructors are
+--     - For each constructor, what types it accepts, and what its kinds are
+--
+-- Some examples:
+--
+-- (data-type Person
+--            (Person String Int))
+--
+dtPerson :: Declare
+dtPerson = DeclareType "Person" [] [DeclareCtor "Person" [TString,TInt]] (KUnknown 0)
+--
+-- Maybe:
+-- (data-type Maybe (a)
+--            Nothing
+--            (Just a))
+--
+-- Parser "dumbly" parses this data type declaration. Note that the kinds of
+-- each type is currently unknown:
+--
+dtMaybe :: Declare
+dtMaybe = DeclareType "Maybe" ["a"] [DeclareCtor "Nothing" [],
+                                     DeclareCtor "Just" [TVarK "a" (KUnknown 0)]]
+                      (KUnknown 1)
+-- Either:
+-- (data-type Either (a b)
+--            (Left a)
+--            (Right b))
+--
+dtEither :: Declare
+dtEither = DeclareType "Either" ["a","b"] [DeclareCtor "Left"  [TVarK "a" (KUnknown 0)],
+                                           DeclareCtor "Right" [TVarK "b" (KUnknown 1)]]
+           (KUnknown 2)
+
+-- (data-type ExceptT (e m a)
+--            (ExceptT (m (Either e a))))
+--
+dtExceptT :: Declare
+dtExceptT = DeclareType "ExceptT" ["e","m","a"]
+                        [DeclareCtor "ExceptT"
+                                  [TApp (TVarK "m" (KUnknown 0))
+                                        (TApp (TApp (TConst "Either" (KUnknown 1)) (TVarK "e" (KUnknown 2)))
+                                              (TVarK "a" (KUnknown 3)))]]
+            (KUnknown 4)
+
+-- (data-type Pair (a b)
+--   (Pair a b))
+--
+dtPair :: Declare
+dtPair = DeclareType "Pair" ["a","b"]
+                     [DeclareCtor "Pair" [TVarK "a" (KUnknown 1),TVarK "b" (KUnknown 2)]]
+                     (KUnknown 3)
+
+dtPair2 :: Declare
+dtPair2 = DeclareType "Pair" ["a","b"]
+                      [DeclareCtor "Pair" [TVarK "a" Star,TVarK "b" Star]]
+                      (KFun Star (KFun Star Star))
+
+
+-- | Primitive function type.
+funT :: Type
+funT = (TConst "->" (KFun Star (KFun Star Star)))
+
+-- (data-type State (s a)
+--   (State (-> s (Pair s a))))
+--
+dtState :: Declare
+dtState = DeclareType "State" ["s","a"]
+                      [DeclareCtor "State"
+                        [TApp (TApp (TConst "->" (KUnknown 0))
+                                    (TVarK "s" (KUnknown 1)))
+                              (TApp (TApp (TConst "Pair" (KUnknown 2)) (TVarK "s" (KUnknown 3)))
+                                    (TVarK "a" (KUnknown 4)))]]
+                      (KUnknown 5)
+dtState2 :: Declare
+dtState2 = DeclareType "State" ["s","a"]
+                       [DeclareCtor "State"
+                         [TApp (TApp funT
+                                     (TVarK "s" Star))
+                               (TApp (TApp (TConst "Pair" (KFun Star (KFun Star Star))) (TVarK "s" Star))
+                                     (TVarK "a" Star))]]
+                       (KFun (KFun Star Star) Star)
+
+-- Recursive data type:
+data Tree a = Leaf a
+            | Branch (Tree a) (Tree a)
+
+dtTree :: Declare
+dtTree = DeclareType "Tree" ["a"]
+                     [DeclareCtor "Leaf" [TVarK "a" (KUnknown 0)],
+                      DeclareCtor "Branch" [TApp (TConst "Tree" (KUnknown 1)) (TVarK "a" (KUnknown 0)),
+                                            TApp (TConst "Tree" (KUnknown 1)) (TVarK "a" (KUnknown 0))]]
+                     (KUnknown 1)
+
+-- Foo :: (* -> * -> *) -> * -> * -> *
+--
+data Dallas a b c d e =  Dallas (a (b c) d e)
+--
+dtFoo :: Declare
+dtFoo = DeclareType "Foo" ["a","b","c","d"]
+          [DeclareCtor "Foo"
+            [TApp (TApp (TApp (TVarK "a" (KUnknown 0))
+                              (TApp (TVarK "b" (KUnknown 1)) (TVarK "c" (KUnknown 2))))
+                        (TVarK "d" (KUnknown 3)))
+                  (TVarK "e" (KUnknown 4))]]
+          (KUnknown 5)
+
+foo = Dallas
+
 ---------------------------
 -- Let's manually do some evaluation.
 ---------------------------
@@ -424,4 +561,96 @@ module Neblen.DataTypes2 where
 --                       DeclareCtor "Branch" [TApp (TConst "Tree" (KFun Star Star)) (TVarK "a" Star),
 --                                             TApp (TConst "Tree" (KFun Star Star)) (TVarK "a" Star)]]
 --                      (KFun Star Star)
+
+
+-- ===============
+-- Kind finder
+-- ===============
+--
+-- Then, we pass this parsed expression into the kind-finder. How the
+-- kind-finder works:
+--
+--   - Recursively evaluate each element, starting with an empty context
+--     - Context is map of tvars to its kind
+--
+--   - If it sees a "standalone" TVarK with unknown kind, set kind to Star
+--     - Save this knowledge in a map context
+--
+--   - If it sees a constant, like "Either", look into a map to see that data
+--     type's kind. If doesn't exist, error.
+--
+--   - If it sees a TApp, evaluate the RHS's kind.
+--     - Evaluate the LHS's kind. Unify RHS kind with LHS kind (like function
+--       unification in the type level)
+--       - If LHS's kind is exactly that, good. Return.
+--       - If LHS's kind is unknown, set it to RHS-KIND -> *
+--       - If LHS's kind is not RHS-KIND -> *, error.
+--
+--   - If it sees a TConst, return.
+--   - When we pop back off to the DeclareType level, we now know each tvar's kind.
+--   - We can now deduce the data type's kind. Maybe we do this somewhere else:
+--     - Check that each tvar the data type declares is used.
+--     - Find each of their kind, ordered by the data type's tvar declaration order.
+--     - Put them together, and you get the data type's kind.
+--
+dtMaybe2 :: Declare
+dtMaybe2 = DeclareType "Maybe" ["a"] [DeclareCtor "Nothing" [],
+                                      DeclareCtor "Just" [TVarK "a" Star]]
+                       (KFun Star Star)
+dtEither2 :: Declare
+dtEither2 = DeclareType "Either" ["a","b"] [DeclareCtor "Left"  [TVarK "a" Star],
+                                            DeclareCtor "Right" [TVarK "b" Star]]
+                        (KFun (KFun Star Star) Star)
+dtExceptT2 :: Declare
+dtExceptT2 = DeclareType "ExceptT" ["e","m","a"]
+                         [DeclareCtor "ExceptT"
+                                   [TApp (TVarK "m" (KFun Star Star))
+                                         (TApp (TApp (TConst "Either" (KFun Star (KFun Star Star))) (TVarK "e" Star))
+                                               (TVarK "a" Star))]]
+                         (KFun Star (KFun (KFun Star Star) (KFun Star Star)))
+
+dtPerson2 :: Declare
+dtPerson2 = DeclareType "Person" [] [DeclareCtor "Person" [TString,TInt]] Star
+
+
+-- More examples:
+data Foo a = Foo (Maybe a)
+data Bar a b = Bar (a b)
+data Far a b = Far (a b) b
+data Complex a b c d e = Complex (b a) (a (c d e))
+
+foo1 :: Foo Int
+foo1 = Foo (Just (0 :: Int))
+
+foo2 :: Foo a
+foo2 = Foo Nothing
+
+bar1 :: Bar Maybe Int
+bar1 = Bar (Just (0 :: Int))
+
+far1 :: Far Maybe Int
+far1 = Far (Just (0 :: Int)) 1
+
+-- Complex :: b a -> a (c d e) -> Complex a b c d e
+--
+-- b = ?
+-- a = Maybe
+-- c = Either d Int
+-- d is free
+-- e = Int
+--
+-- Kind of `Complex` is:
+--
+--   a :: * -> *
+--   b :: (* -> *) -> *
+--   c :: * -> * -> *
+--   d :: *
+--   e :: *
+--
+-- Clownpiece: So something like Fix f = Fold {unFold :: f (Fix f)} would work for b.
+--
+-- complex1 :: Complex Maybe ? (Either d Int) d Int
+-- complex1 = Complex _ (Just (Right (0 :: Int)))
+
+-- data Fix f = Fold { unFold :: f (Fix f) }
 
