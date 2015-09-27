@@ -1,3 +1,6 @@
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
+
 module Neblen.DataTypes where
 
 import Neblen.Data
@@ -35,32 +38,73 @@ instance HasKind Type where
                          (KFun _ k) -> k
   kindOf _ = error "One does not ask for the kind of a constructor."
 
+-- TODO
 -- Game plan:
 --
--- - Call evalKind for each ctor, passing in the new kenv and ksub every go-round.
+-- - Call evalCtorKind for each ctor, passing in the new kenv and ksub every go-round.
 -- - At the end, you have a kenv and ksub ready to go. Call a "substitute"
 --   method that replaces all of unknowns with stars.
 -- - Then, we need to return a new DeclareType with the kinds filled in
+--
+-- TODO write tests
+--
+-- (data-type Person (Person String Int))
+--
+-- >>> evalState (evalDataTypeKind M.empty M.empty (DeclareType "Person" [] [DeclareCtor "Person" [TString,TInt]] (KUnknown 0))) (initFreshCounterAt 10)
+-- (fromList [],DeclareType "Person" [] [DeclareCtor "Person" [String,Int]] *)
+--
+-- >>> evalState (evalDataTypeKind M.empty M.empty (DeclareType "Maybe" ["a"] [DeclareCtor "Nothing" [], DeclareCtor "Just" [TVarK "a" (KUnknown 0)]] (KUnknown 1))) (initFreshCounterAt 10)
+-- [("a",*)],DeclareType "Maybe" ["a"] [DeclareCtor "Nothing" [],DeclareCtor "Just" [a]] (* -> *))
 --
 evalDataTypeKind :: KConstEnv -> KEnv -> DeclareType -> KindCheck (KEnv, DeclareType)
 evalDataTypeKind cenv kenv declare@(DeclareType name tvs ctors kind) = do
   (kenv2, ksub2) <- foldl (\kindCheck ctor -> do
                                (kenv', ksub') <- kindCheck
-                               (kenv'', ksub'') <- evalKind cenv kenv' ksub' ctor
+                               (kenv'', ksub'') <- evalCtorKind cenv kenv' ksub' ctor
                                return (kenv'', ksub'' `composeKSubst` ksub'))
                          (return (kenv, M.empty)) ctors
-  -- TODO:
-  --  - as we are replacing the unknown kind vars with stars, we need to
-  --  remember the mapping so that we know the final kind of this data type. But
-  --  kapply doesn't return a KEnv. So how?
-  return (kenv2, kapply ksub2 declare)
-evalDataTypeKind cenv kenv _ = error "Should only be called for top-level data type declaration."
+  let ksub3 = replaceWithStars (trace ("\n=====Got ksub2: " ++ show ksub2 ++ " kenv2: " ++ show kenv2 ++ ";;;;\n") ksub2)
+  let declare2 = kapply ksub3 declare
+  let kenv3 = replaceWithStars (kapply ksub3 kenv2)
+  let k = findFinalKind kenv3 tvs
+  return (kenv3, replaceDeclareTypeKind declare2 k)
+
+replaceDeclareTypeKind :: DeclareType -> Kind -> DeclareType
+replaceDeclareTypeKind (DeclareType name tvs ctors _) kind = DeclareType name tvs ctors kind
+
+findFinalKind :: KEnv -> [TName] -> Kind
+findFinalKind kenv [] = Star
+findFinalKind kenv (tv:tvs) =
+  case M.lookup tv kenv of
+    Just k -> KFun k (findFinalKind kenv tvs)
+    Nothing -> error $ "could not find " ++ show tv
+
+replaceWithStars :: M.Map k Kind -> M.Map k Kind
+replaceWithStars m = M.map replaceKindWithStars m
+
+replaceKindWithStars :: Kind -> Kind
+replaceKindWithStars (KFun k1 k2) = KFun (replaceKindWithStars k1) (replaceKindWithStars k2)
+replaceKindWithStars _ = Star
 
 -- | Evaluate the kind of a data constructor.
 --
+-- TODO write tests
 --
-evalKind :: KConstEnv -> KEnv -> KSubst -> DeclareCtor -> KindCheck (KEnv, KSubst)
-evalKind cenv kenv ksub (DeclareCtor name types) = return (kenv, ksub)
+-- >>> evalState (evalCtorKind M.empty M.empty M.empty (DeclareCtor "Just" [TVarK "a" (KUnknown 0)])) (initFreshCounterAt 1)
+-- (fromList [("a",k0)],fromList [])
+--
+-- >>> evalState (evalCtorKind M.empty M.empty M.empty (DeclareCtor "Foo" [TApp (TVarK "a" (KUnknown 0)) (TVarK "b" (KUnknown 1)), TVarK "a" (KUnknown 0)])) (initFreshCounterAt 10)
+-- (fromList [("a",(k1 -> k10)),("b",k1)],fromList [(0,(k1 -> k10))])
+--
+evalCtorKind :: KConstEnv -> KEnv -> KSubst -> DeclareCtor -> KindCheck (KEnv, KSubst)
+evalCtorKind cenv kenv ksub (DeclareCtor _ types) = do
+  (kenv2, ksub2) <- foldl (\kindCheck t -> do
+                             (kenv', ksub') <- kindCheck
+                             (kenv'', ksub'', _) <- evalKindOfType cenv kenv' ksub' t
+                             return (kenv'', ksub'' `composeKSubst` ksub'))
+                      (return (kenv, ksub)) types
+  return (kapply ksub2 kenv2, ksub2)
+-- evalKindOfType :: KConstEnv -> KEnv -> KSubst -> Type -> KindCheck (KEnv, KSubst, Kind)
   -- TODO: actually implement this
   -- As we go through each type, getting new KEnv and KSubst, apply and merge
   -- these envs together.
@@ -127,7 +171,6 @@ evalKindOfType cenv kenv ksub (TConst name k) =
   if M.member name cenv
   then return (kenv, ksub, k)
   else error ("Unknown TConst: " ++ show (TConst name k))
-
 evalKindOfType cenv kenv ksub (TApp t1 t2) = do
   -- Find kind and environment of LHS and RHS
   (kenv1, ksub1, k1) <- evalKindOfType cenv kenv ksub t1
@@ -136,7 +179,7 @@ evalKindOfType cenv kenv ksub (TApp t1 t2) = do
   kv <- nextFreshCounter >>= return . KUnknown
   -- Compose all kind variable (integer) substitutions together
   let ksub3 = (M.singleton (getKindVar k1) (KFun k2 kv)) `composeKSubst` ksub2 `composeKSubst` ksub1
-  return (M.map (kapply ksub3) kenv2, ksub3 `composeKSubst` ksub3, kv)
+  return (kapply ksub3 kenv2, ksub3 `composeKSubst` ksub3, kv)
 
 evalKindOfType _ kenv ksub TInt = return (kenv, ksub, Star)
 evalKindOfType _ kenv ksub TBool = return (kenv, ksub, Star)
@@ -144,6 +187,7 @@ evalKindOfType _ kenv ksub TString = return (kenv, ksub, Star)
 
 getKindVar :: Kind -> Int
 getKindVar (KUnknown i) = i
+getKindVar _ = error "Should not be called on known kind."
 
 nextFreshCounter :: KindCheck Int
 nextFreshCounter = do
@@ -160,8 +204,15 @@ instance KSubstitutable Kind where
   kapply ksub (KFun k1 k2) = KFun (kapply ksub k1) (kapply ksub k2)
   kapply ksub (KUnknown i) = fromMaybe (KUnknown i) (M.lookup i ksub)
 
+instance KSubstitutable KEnv where
+  kapply ksub kenv = M.map (kapply ksub) kenv
+
 instance KSubstitutable DeclareType where
-  kapply ksub (DeclareType name tvs ctors kind) = DeclareType name tvs (map (kapply ksub) ctors) (kapply ksub kind)
+  kapply ksub (DeclareType name tvs ctors kind) =
+    DeclareType
+      name tvs
+      (map (kapply ksub) ctors)
+      (kapply ksub kind)
 
 instance KSubstitutable DeclareCtor where
   kapply ksub (DeclareCtor name types) = DeclareCtor name (map (kapply ksub) types)

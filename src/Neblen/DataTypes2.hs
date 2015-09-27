@@ -37,7 +37,7 @@ import Neblen.DataTypes
 -- (data-type Person
 --            (Person String Int))
 --
-dtPerson :: Declare
+dtPerson :: DeclareType
 dtPerson = DeclareType "Person" [] [DeclareCtor "Person" [TString,TInt]] (KUnknown 0)
 --
 -- Maybe:
@@ -48,7 +48,7 @@ dtPerson = DeclareType "Person" [] [DeclareCtor "Person" [TString,TInt]] (KUnkno
 -- Parser "dumbly" parses this data type declaration. Note that the kinds of
 -- each type is currently unknown:
 --
-dtMaybe :: Declare
+dtMaybe :: DeclareType
 dtMaybe = DeclareType "Maybe" ["a"] [DeclareCtor "Nothing" [],
                                      DeclareCtor "Just" [TVarK "a" (KUnknown 0)]]
                       (KUnknown 1)
@@ -57,7 +57,7 @@ dtMaybe = DeclareType "Maybe" ["a"] [DeclareCtor "Nothing" [],
 --            (Left a)
 --            (Right b))
 --
-dtEither :: Declare
+dtEither :: DeclareType
 dtEither = DeclareType "Either" ["a","b"] [DeclareCtor "Left"  [TVarK "a" (KUnknown 0)],
                                            DeclareCtor "Right" [TVarK "b" (KUnknown 1)]]
            (KUnknown 2)
@@ -65,7 +65,7 @@ dtEither = DeclareType "Either" ["a","b"] [DeclareCtor "Left"  [TVarK "a" (KUnkn
 -- (data-type ExceptT (e m a)
 --            (ExceptT (m (Either e a))))
 --
-dtExceptT :: Declare
+dtExceptT :: DeclareType
 dtExceptT = DeclareType "ExceptT" ["e","m","a"]
                         [DeclareCtor "ExceptT"
                                   [TApp (TVarK "m" (KUnknown 0))
@@ -76,12 +76,12 @@ dtExceptT = DeclareType "ExceptT" ["e","m","a"]
 -- (data-type Pair (a b)
 --   (Pair a b))
 --
-dtPair :: Declare
+dtPair :: DeclareType
 dtPair = DeclareType "Pair" ["a","b"]
                      [DeclareCtor "Pair" [TVarK "a" (KUnknown 1),TVarK "b" (KUnknown 2)]]
                      (KUnknown 3)
 
-dtPair2 :: Declare
+dtPair2 :: DeclareType
 dtPair2 = DeclareType "Pair" ["a","b"]
                       [DeclareCtor "Pair" [TVarK "a" Star,TVarK "b" Star]]
                       (KFun Star (KFun Star Star))
@@ -94,7 +94,7 @@ funT = (TConst "->" (KFun Star (KFun Star Star)))
 -- (data-type State (s a)
 --   (State (-> s (Pair s a))))
 --
-dtState :: Declare
+dtState :: DeclareType
 dtState = DeclareType "State" ["s","a"]
                       [DeclareCtor "State"
                         [TApp (TApp (TConst "->" (KUnknown 0))
@@ -102,7 +102,7 @@ dtState = DeclareType "State" ["s","a"]
                               (TApp (TApp (TConst "Pair" (KUnknown 2)) (TVarK "s" (KUnknown 3)))
                                     (TVarK "a" (KUnknown 4)))]]
                       (KUnknown 5)
-dtState2 :: Declare
+dtState2 :: DeclareType
 dtState2 = DeclareType "State" ["s","a"]
                        [DeclareCtor "State"
                          [TApp (TApp funT
@@ -115,7 +115,7 @@ dtState2 = DeclareType "State" ["s","a"]
 data Tree a = Leaf a
             | Branch (Tree a) (Tree a)
 
-dtTree :: Declare
+dtTree :: DeclareType
 dtTree = DeclareType "Tree" ["a"]
                      [DeclareCtor "Leaf" [TVarK "a" (KUnknown 0)],
                       DeclareCtor "Branch" [TApp (TConst "Tree" (KUnknown 1)) (TVarK "a" (KUnknown 0)),
@@ -126,7 +126,7 @@ dtTree = DeclareType "Tree" ["a"]
 --
 data Dallas a b c d e =  Dallas (a (b c) d e)
 --
-dtFoo :: Declare
+dtFoo :: DeclareType
 dtFoo = DeclareType "Foo" ["a","b","c","d"]
           [DeclareCtor "Foo"
             [TApp (TApp (TApp (TVarK "a" (KUnknown 0))
@@ -147,7 +147,7 @@ foo = Dallas
 --
 -- data ExceptT e m a = m (Either e a)
 --
--- dtExceptT :: Declare
+-- dtExceptT :: DeclareType
 -- dtExceptT = DeclareType "ExceptT" ["e","m","a"]
 --                         [DeclareCtor "ExceptT"
 --                           [TApp (TVarK "m" (KUnknown 0))
@@ -290,7 +290,7 @@ foo = Dallas
 --
 -- Parse this, and give each TVarK a unique integer:
 --
--- dtFoo :: Declare
+-- dtFoo :: DeclareType
 -- dtFoo = DeclareType "Foo" ["a","b","c","d"]
 --           [DeclareCtor "Foo"
 --             [TApp (TApp (TApp (TVarK "a" (KUnknown 0))
@@ -555,7 +555,7 @@ foo = Dallas
 -- And return:
 --
 --
--- dtTree :: Declare
+-- dtTree :: DeclareType
 -- dtTree = DeclareType "Tree" ["a"]
 --                      [DeclareCtor "Leaf" [TVarK "a" Star],
 --                       DeclareCtor "Branch" [TApp (TConst "Tree" (KFun Star Star)) (TVarK "a" Star),
@@ -593,15 +593,15 @@ foo = Dallas
 --     - Find each of their kind, ordered by the data type's tvar declaration order.
 --     - Put them together, and you get the data type's kind.
 --
-dtMaybe2 :: Declare
+dtMaybe2 :: DeclareType
 dtMaybe2 = DeclareType "Maybe" ["a"] [DeclareCtor "Nothing" [],
                                       DeclareCtor "Just" [TVarK "a" Star]]
                        (KFun Star Star)
-dtEither2 :: Declare
+dtEither2 :: DeclareType
 dtEither2 = DeclareType "Either" ["a","b"] [DeclareCtor "Left"  [TVarK "a" Star],
                                             DeclareCtor "Right" [TVarK "b" Star]]
                         (KFun (KFun Star Star) Star)
-dtExceptT2 :: Declare
+dtExceptT2 :: DeclareType
 dtExceptT2 = DeclareType "ExceptT" ["e","m","a"]
                          [DeclareCtor "ExceptT"
                                    [TApp (TVarK "m" (KFun Star Star))
@@ -609,7 +609,7 @@ dtExceptT2 = DeclareType "ExceptT" ["e","m","a"]
                                                (TVarK "a" Star))]]
                          (KFun Star (KFun (KFun Star Star) (KFun Star Star)))
 
-dtPerson2 :: Declare
+dtPerson2 :: DeclareType
 dtPerson2 = DeclareType "Person" [] [DeclareCtor "Person" [TString,TInt]] Star
 
 
