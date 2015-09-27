@@ -416,26 +416,6 @@ check tenv s e = case e of
     s3 <- unify (apply s2 fnT) (apply s2 (TFun (bodyT : [retT])))
     return (composeAll [s3, s2, s1, s], apply s3 retT)
 
-  -- TODO:
-  --
-  -- - get fresh type vars for tvs and the ones in ctors, so that they don't
-  --   collide w/ the ones in the current env.
-  --
-  -- - verify the type vars used in ctors are in `tvs`
-  --
-  -- - This returns type Unit, but its constructors needs to be added to the
-  -- TEnv. But how do we do this? We CAN use another env, like a data
-  -- constructor env.
-  --
-  -- Or, assume that data type defs are handled BEFORE type checking. They are a
-  -- top-level construct, so should assume to be correct here.
-  DefDataType n tvs ctors -> return (s, TUnit)
-
-  -- TODO
-  --
-  -- - return a TDataType type
-  DataCtor n ts -> return (s, TUnit)
-
   CtorApp n exprs -> return (s, TInt)
 
   BinOp{} -> error "Shouldn't need to type check BinOps."

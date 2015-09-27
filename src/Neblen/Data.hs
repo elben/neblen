@@ -24,13 +24,19 @@ data Exp = Lit Value
          | Let Exp Exp Exp   -- ^ Let (Var "x") (Value of x) Body.
          | If Exp Exp Exp    -- ^ If (Predicate : Bool) (Then clause) (Else clause)
          | BinOp String Exp Exp
-         | DefDataType Name [TName] [Exp] -- ^ DefDataType Name [TName] [DataCtor]
-         | DataCtor Name [Type]
          | CtorApp Exp [Exp] -- CtorApp DataCtor [Exp]
   deriving (Show, Eq)
 
 -- Type variable.
 type TName = String
+
+-- | Data type declaration.
+data DeclareType = DeclareType Name [TName] [DeclareCtor] Kind
+  deriving (Show, Eq, Ord)
+
+-- | Data type constructor declaration.
+data DeclareCtor = DeclareCtor Name [Type]
+  deriving (Show, Eq, Ord)
 
 -- | Kinds are the "type of types". They are either monotypes or function kinds.
 -- Kinds are used to check that a type is well-formed.

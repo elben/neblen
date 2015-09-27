@@ -7,9 +7,9 @@ import Control.Monad.Trans.State
 
 -- | Data type declarations. Separated out from regular expressions.
 --
-data Declare = DeclareType Name [TName] [Declare] Kind
-             | DeclareCtor Name [Type]
-  deriving (Show, Eq, Ord)
+-- data Declare = DeclareType Name [TName] [Declare] Kind
+--              | DeclareCtor Name [Type]
+--   deriving (Show, Eq, Ord)
 
 -- | Mapping of type variable (from TVarK) to kind.
 type KEnv = M.Map TName Kind
@@ -25,9 +25,8 @@ type KindCheck a = State FreshCounter a
 class HasKind a where
   kindOf :: a -> Kind
 
-instance HasKind Declare where
+instance HasKind DeclareType where
   kindOf (DeclareType _ _ _ k) = k
-  kindOf DeclareCtor{} = error "One does not ask for the kind of a constructor."
 
 instance HasKind Type where
   kindOf (TConst _ k) = k
@@ -42,7 +41,8 @@ instance HasKind Type where
 -- - At the end, you have a kenv and ksub ready to go. Call a "substitute"
 --   method that replaces all of unknowns with stars.
 -- - Then, we need to return a new DeclareType with the kinds filled in
-evalDataTypeKind :: KConstEnv -> KEnv -> Declare -> KindCheck (KEnv, Declare)
+--
+evalDataTypeKind :: KConstEnv -> KEnv -> DeclareType -> KindCheck (KEnv, DeclareType)
 evalDataTypeKind cenv kenv declare@(DeclareType name tvs ctors kind) = do
   (kenv2, ksub2) <- foldl (\kindCheck ctor -> do
                                (kenv', ksub') <- kindCheck
@@ -58,11 +58,12 @@ evalDataTypeKind cenv kenv _ = error "Should only be called for top-level data t
 
 -- | Evaluate the kind of a data constructor.
 --
-evalKind :: KConstEnv -> KEnv -> KSubst -> Declare -> KindCheck (KEnv, KSubst)
+--
+evalKind :: KConstEnv -> KEnv -> KSubst -> DeclareCtor -> KindCheck (KEnv, KSubst)
 evalKind cenv kenv ksub (DeclareCtor name types) = return (kenv, ksub)
+  -- TODO: actually implement this
   -- As we go through each type, getting new KEnv and KSubst, apply and merge
   -- these envs together.
-evalKind cenv kenv ksub (DeclareType {}) = error "Should not be called on DeclareTypes"
 
 -- | Evaluate kind of type.
 --
@@ -159,8 +160,10 @@ instance KSubstitutable Kind where
   kapply ksub (KFun k1 k2) = KFun (kapply ksub k1) (kapply ksub k2)
   kapply ksub (KUnknown i) = fromMaybe (KUnknown i) (M.lookup i ksub)
 
-instance KSubstitutable Declare where
+instance KSubstitutable DeclareType where
   kapply ksub (DeclareType name tvs ctors kind) = DeclareType name tvs (map (kapply ksub) ctors) (kapply ksub kind)
+
+instance KSubstitutable DeclareCtor where
   kapply ksub (DeclareCtor name types) = DeclareCtor name (map (kapply ksub) types)
 
 instance KSubstitutable Type where
