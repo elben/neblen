@@ -7,6 +7,8 @@ import Neblen.Data
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe)
 import Control.Monad.Trans.State
+import Control.Monad (liftM)
+
 
 -- | Data type declarations. Separated out from regular expressions.
 --
@@ -28,14 +30,7 @@ type KindCheck a = State FreshCounter a
 -- | Evaluate a type declaration. Returns a new data type environment, and the
 -- current data type with its kinds filled out.
 --
--- TODO!!
---
--- - [ ] Write more example tests (Dallas data type, ExceptT)
--- - [ ] Why are the type variable kinds returned in an env instead of being in
---       the data type declaration? What if the return value was jsut a
---       `KindCheck DeclareType`? If you look at the tests, we are returning as
---       part of the new DeclareType the type vars but without the kinds
---       attached. Why? They should be returning as TVarKs, no?
+-- = Examples:
 --
 -- Person, a simple data type:
 --
@@ -120,7 +115,7 @@ evalDataTypeKind ::
   -> DeclareType
   -- ^ The data type we're trying to find the kind of
   -> KindCheck (KEnv, DeclareType)
-evalDataTypeKind cenv kenv declare@(DeclareType name tvs ctors k) = do
+evalDataTypeKind cenv kenv (DeclareType name tvs ctors k) = do
   -- Add current data type (whose kind is unknown) into const env to handle
   -- recursive data types.
   let cenv2 = M.insert name k cenv
@@ -138,10 +133,7 @@ evalDataTypeKind cenv kenv declare@(DeclareType name tvs ctors k) = do
   -- Find the final kind of the data type, given the data type's type variables,
   -- and the finalized kind environment.
   let dataTypeKind = findFinalKind kenv3 tvs
-  return (kenv3, replaceDeclareTypeKind declare dataTypeKind)
-
-replaceDeclareTypeKind :: DeclareType -> Kind -> DeclareType
-replaceDeclareTypeKind (DeclareType name tvs ctors _) kind = DeclareType name tvs ctors kind
+  return (kenv3, DeclareType name tvs ctors dataTypeKind)
 
 -- | Given a kind mapping, convert a list of type variables to a kind function
 -- that takes each type variable in order.
@@ -158,7 +150,7 @@ findFinalKind kenv (tv:tvs) =
 
 -- | Replace all unknown kinds with Star.
 replaceWithStars :: M.Map k Kind -> M.Map k Kind
-replaceWithStars m = M.map replaceKindWithStars m
+replaceWithStars = M.map replaceKindWithStars
 
 -- | Replace all unknown kinds with Star.
 replaceKindWithStars :: Kind -> Kind
@@ -239,7 +231,7 @@ evalCtorKind cenv kenv ksub (DeclareCtor _ types) = do
 -- (fromList [("a",(k10 -> (k3 -> k12))),("b",(k2 -> k10)),("c",k2),("d",k3)],fromList [(0,(k10 -> (k3 -> k12))),(1,(k2 -> k10)),(11,(k3 -> k12))],k12)
 --
 evalKindOfType :: KConstEnv -> KEnv -> KSubst -> Type -> KindCheck (KEnv, KSubst, Kind)
-evalKindOfType _ kenv ksub (TVarK tv (KUnknown kv)) = return (M.insert tv (KUnknown kv) kenv, ksub, KUnknown kv)
+evalKindOfType _    kenv ksub (TVarK tv (KUnknown kv)) = return (M.insert tv (KUnknown kv) kenv, ksub, KUnknown kv)
 evalKindOfType cenv kenv ksub (TConst name k) =
   if M.member name cenv
   then return (kenv, ksub, k)
@@ -248,15 +240,16 @@ evalKindOfType cenv kenv ksub (TApp t1 t2) = do
   -- Find kind and environment of LHS and RHS
   (kenv1, ksub1, k1) <- evalKindOfType cenv kenv ksub t1
   (kenv2, ksub2, k2) <- evalKindOfType cenv kenv1 (ksub1 `composeKSubst` ksub) t2
-  -- Get a fresh kind variable; the return kind of the application
-  kv <- nextFreshCounter >>= return . KUnknown
+  -- Get a fresh kind variable; lifts `KUnknown` function into the State monad
+  -- with the fresh integer.
+  kv <- liftM KUnknown nextFreshCounter
   -- Compose all kind variable (integer) substitutions together
-  let ksub3 = (M.singleton (getKindVar k1) (KFun k2 kv)) `composeKSubst` ksub2 `composeKSubst` ksub1
+  let ksub3 = M.singleton (getKindVar k1) (KFun k2 kv) `composeKSubst` ksub2 `composeKSubst` ksub1
   return (kapply ksub3 kenv2, ksub3 `composeKSubst` ksub3, kv)
-
 evalKindOfType _ kenv ksub TInt = return (kenv, ksub, Star)
 evalKindOfType _ kenv ksub TBool = return (kenv, ksub, Star)
 evalKindOfType _ kenv ksub TString = return (kenv, ksub, Star)
+evalKindOfType _ _ _ t = error $ "Unsupported type: " ++ show t
 
 getKindVar :: Kind -> Int
 getKindVar (KUnknown i) = i
@@ -278,7 +271,7 @@ instance KSubstitutable Kind where
   kapply ksub (KUnknown i) = fromMaybe (KUnknown i) (M.lookup i ksub)
 
 instance KSubstitutable KEnv where
-  kapply ksub kenv = M.map (kapply ksub) kenv
+  kapply ksub = M.map (kapply ksub)
 
 instance KSubstitutable DeclareType where
   -- Replace unknown kinds with the given substitutions
