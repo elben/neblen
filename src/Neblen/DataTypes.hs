@@ -20,7 +20,7 @@ type KEnv = M.Map TName Kind
 -- | Mapping of unknown kind variables to kinds.
 type KSubst = M.Map Int Kind
 
--- | Mapping of data type constant to kind. (e.g. Left : KFun KStar KStar)
+-- | Mapping of data type constant to kind. (e.g. Either : * -> * -> *)
 type KConstEnv = M.Map TName Kind
 
 type KindCheck a = State FreshCounter a
@@ -38,8 +38,8 @@ instance HasKind Type where
                          (KFun _ k) -> k
   kindOf _ = error "One does not ask for the kind of a constructor."
 
--- TODO
--- Game plan:
+-- | Evaluate a type declaration. Returns a new data type environment, and the
+-- current data type with its kinds filled out.
 --
 -- - Call evalCtorKind for each ctor, passing in the new kenv and ksub every go-round.
 -- - At the end, you have a kenv and ksub ready to go. Call a "substitute"
@@ -48,40 +48,109 @@ instance HasKind Type where
 --
 -- TODO write tests
 --
--- (data-type Person (Person String Int))
+-- Person, a simple data type:
+--
+--   data Person = Person String Int
+--   (data-type Person (Person String Int))
 --
 -- >>> evalState (evalDataTypeKind M.empty M.empty (DeclareType "Person" [] [DeclareCtor "Person" [TString,TInt]] (KUnknown 0))) (initFreshCounterAt 10)
 -- (fromList [],DeclareType "Person" [] [DeclareCtor "Person" [String,Int]] *)
 --
--- >>> evalState (evalDataTypeKind M.empty M.empty (DeclareType "Maybe" ["a"] [DeclareCtor "Nothing" [], DeclareCtor "Just" [TVarK "a" (KUnknown 0)]] (KUnknown 1))) (initFreshCounterAt 10)
--- [("a",*)],DeclareType "Maybe" ["a"] [DeclareCtor "Nothing" [],DeclareCtor "Just" [a]] (* -> *))
+-- Maybe:
 --
-evalDataTypeKind :: KConstEnv -> KEnv -> DeclareType -> KindCheck (KEnv, DeclareType)
-evalDataTypeKind cenv kenv declare@(DeclareType name tvs ctors kind) = do
+--  data Maybe a = Nothing | Just a
+--  (data-type Maybe (a) Nothing (Just a))
+--
+-- >>> evalState (evalDataTypeKind M.empty M.empty (DeclareType "Maybe" ["a"] [DeclareCtor "Nothing" [], DeclareCtor "Just" [TVarK "a" (KUnknown 0)]] (KUnknown 1))) (initFreshCounterAt 10)
+-- (fromList [("a",*)],DeclareType "Maybe" ["a"] [DeclareCtor "Nothing" [],DeclareCtor "Just" [a]] (* -> *))
+--
+-- Either:
+--
+--   data Either a b = Left a | Right b
+--   (data-type Either (a b) (Left a) (Right b))
+--
+-- >>> evalState (evalDataTypeKind M.empty M.empty (DeclareType "Either" ["a", "b"] [DeclareCtor "Left" [TVarK "a" (KUnknown 0)], DeclareCtor "Just" [TVarK "b" (KUnknown 1)]] (KUnknown 2))) (initFreshCounterAt 10)
+-- (fromList [("a",*),("b",*)],DeclareType "Either" ["a","b"] [DeclareCtor "Left" [a],DeclareCtor "Just" [b]] (* -> (* -> *)))
+--
+-- ExceptT:
+--
+-- >>> :{
+-- evalState
+--   (evalDataTypeKind (M.fromList [("Either",KFun Star (KFun Star Star))]) M.empty
+--     (DeclareType "ExceptT" ["e","m","a"] [
+--       DeclareCtor "ExceptT" [
+--         TApp (TVarK "m" (KUnknown 0))
+--              (TApp (TApp (TConst "Either" (KUnknown 1)) (TVarK "e" (KUnknown 2)))
+--              (TVarK "a" (KUnknown 3)))]]
+--       (KUnknown 4)))
+--   (initFreshCounterAt 10)
+-- :}
+-- Foo
+--
+-- Tree:
+--
+--   data Tree a = Leaf a | Branch (Tree a) (Tree a)
+--   (data-type Tree (a) (Leaf a) (Branch (Tree a) (Tree a)))
+--
+-- >>> :{
+-- evalState
+--   (evalDataTypeKind M.empty M.empty
+--     (DeclareType "Tree" ["a"] [
+--       DeclareCtor "Leaf" [TVarK "a" (KUnknown 0)],
+--       DeclareCtor "Branch" [
+--         TApp (TConst "Tree" (KUnknown 1)) (TVarK "a" (KUnknown 0)),
+--         TApp (TConst "Tree" (KUnknown 1)) (TVarK "a" (KUnknown 0))]]
+--      (KUnknown 1)))
+--   (initFreshCounterAt 10)
+-- :}
+-- Foo
+--
+evalDataTypeKind ::
+  KConstEnv
+  -- ^ Mapping of data type to its kind.
+  -> KEnv
+  -- ^ Do we need this? Mapping of type var to kind
+  -> DeclareType
+  -- ^ The data type we're trying to find the kind of
+  -> KindCheck (KEnv, DeclareType)
+evalDataTypeKind cenv kenv declare@(DeclareType _ tvs ctors _) = do
+  -- Evaluate each constructor's kind, building up the subsitution map.
   (kenv2, ksub2) <- foldl (\kindCheck ctor -> do
                                (kenv', ksub') <- kindCheck
                                (kenv'', ksub'') <- evalCtorKind cenv kenv' ksub' ctor
+                               -- Compose the new substitution with the old one
                                return (kenv'', ksub'' `composeKSubst` ksub'))
                          (return (kenv, M.empty)) ctors
-  let ksub3 = replaceWithStars (trace ("\n=====Got ksub2: " ++ show ksub2 ++ " kenv2: " ++ show kenv2 ++ ";;;;\n") ksub2)
-  let declare2 = kapply ksub3 declare
-  let kenv3 = replaceWithStars (kapply ksub3 kenv2)
-  let k = findFinalKind kenv3 tvs
-  return (kenv3, replaceDeclareTypeKind declare2 k)
+  -- Substitute all type variables with the final substitution mapping. Then,
+  -- replace all unknown kinds with Star, since at this point there are no more
+  -- substitutions to be made.
+  let kenv3 = replaceWithStars (kapply ksub2 kenv2)
+  -- Find the final kind of the data type, given the data type's type variables,
+  -- and the finalized kind environment.
+  let dataTypeKind = findFinalKind kenv3 tvs
+  return (kenv3, replaceDeclareTypeKind declare dataTypeKind)
 
 replaceDeclareTypeKind :: DeclareType -> Kind -> DeclareType
 replaceDeclareTypeKind (DeclareType name tvs ctors _) kind = DeclareType name tvs ctors kind
 
+-- | Given a kind mapping, convert a list of type variables to a kind function
+-- that takes each type variable in order.
+--
+-- >>> findFinalKind (M.fromList [("a",Star),("b",KFun Star Star)]) ["a","b"]
+-- (* -> ((* -> *) -> *))
+--
 findFinalKind :: KEnv -> [TName] -> Kind
-findFinalKind kenv [] = Star
+findFinalKind _ [] = Star
 findFinalKind kenv (tv:tvs) =
   case M.lookup tv kenv of
     Just k -> KFun k (findFinalKind kenv tvs)
     Nothing -> error $ "could not find " ++ show tv
 
+-- | Replace all unknown kinds with Star.
 replaceWithStars :: M.Map k Kind -> M.Map k Kind
 replaceWithStars m = M.map replaceKindWithStars m
 
+-- | Replace all unknown kinds with Star.
 replaceKindWithStars :: Kind -> Kind
 replaceKindWithStars (KFun k1 k2) = KFun (replaceKindWithStars k1) (replaceKindWithStars k2)
 replaceKindWithStars _ = Star
@@ -104,10 +173,6 @@ evalCtorKind cenv kenv ksub (DeclareCtor _ types) = do
                              return (kenv'', ksub'' `composeKSubst` ksub'))
                       (return (kenv, ksub)) types
   return (kapply ksub2 kenv2, ksub2)
--- evalKindOfType :: KConstEnv -> KEnv -> KSubst -> Type -> KindCheck (KEnv, KSubst, Kind)
-  -- TODO: actually implement this
-  -- As we go through each type, getting new KEnv and KSubst, apply and merge
-  -- these envs together.
 
 -- | Evaluate kind of type.
 --
@@ -208,6 +273,7 @@ instance KSubstitutable KEnv where
   kapply ksub kenv = M.map (kapply ksub) kenv
 
 instance KSubstitutable DeclareType where
+  -- Replace unknown kinds with the given substitutions
   kapply ksub (DeclareType name tvs ctors kind) =
     DeclareType
       name tvs

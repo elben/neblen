@@ -59,7 +59,7 @@ data Type = TUnit
           | TVar TName
 
           -- Stuff with kinds:
-          | TConst TName Kind
+          | TConst TName Kind -- e.g. TConst "Either" (* -> * -> *)
           | TVarK TName Kind -- A type var with a kind
           | TApp Type Type
 
