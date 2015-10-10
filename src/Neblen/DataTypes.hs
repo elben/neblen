@@ -25,28 +25,17 @@ type KConstEnv = M.Map TName Kind
 
 type KindCheck a = State FreshCounter a
 
-class HasKind a where
-  kindOf :: a -> Kind
-
-instance HasKind DeclareType where
-  kindOf (DeclareType _ _ _ k) = k
-
-instance HasKind Type where
-  kindOf (TConst _ k) = k
-  kindOf (TVarK _ k) = k
-  kindOf (TApp t1 _) = case kindOf t1 of
-                         (KFun _ k) -> k
-  kindOf _ = error "One does not ask for the kind of a constructor."
-
 -- | Evaluate a type declaration. Returns a new data type environment, and the
 -- current data type with its kinds filled out.
 --
--- - Call evalCtorKind for each ctor, passing in the new kenv and ksub every go-round.
--- - At the end, you have a kenv and ksub ready to go. Call a "substitute"
---   method that replaces all of unknowns with stars.
--- - Then, we need to return a new DeclareType with the kinds filled in
+-- TODO!!
 --
--- TODO write tests
+-- - [ ] Write more example tests (Dallas data type, ExceptT)
+-- - [ ] Why are the type variable kinds returned in an env instead of being in
+--       the data type declaration? What if the return value was jsut a
+--       `KindCheck DeclareType`? If you look at the tests, we are returning as
+--       part of the new DeclareType the type vars but without the kinds
+--       attached. Why? They should be returning as TVarKs, no?
 --
 -- Person, a simple data type:
 --
@@ -85,7 +74,7 @@ instance HasKind Type where
 --       (KUnknown 4)))
 --   (initFreshCounterAt 10)
 -- :}
--- Foo
+-- (fromList [("a",*),("e",*),("m",(* -> *))],DeclareType "ExceptT" ["e","m","a"] [DeclareCtor "ExceptT" [(m ((Either e) a))]] (* -> ((* -> *) -> (* -> *))))
 --
 -- Tree:
 --
@@ -103,21 +92,42 @@ instance HasKind Type where
 --      (KUnknown 1)))
 --   (initFreshCounterAt 10)
 -- :}
--- Foo
+-- (fromList [("a",*)],DeclareType "Tree" ["a"] [DeclareCtor "Leaf" [a],DeclareCtor "Branch" [(Tree a),(Tree a)]] (* -> *))
+--
+-- Complex type:
+--
+--   data Dallas a b c d e =  Dallas (a (b c) d e)
+--
+-- >>> :{
+-- evalState
+--   (evalDataTypeKind M.empty M.empty
+--     (DeclareType "Complex" ["a","b","c","d"]
+--       [DeclareCtor "Complex"
+--         [TApp (TApp (TApp (TVarK "a" (KUnknown 0))
+--                           (TApp (TVarK "b" (KUnknown 1)) (TVarK "c" (KUnknown 2))))
+--                     (TVarK "d" (KUnknown 3)))
+--               (TVarK "e" (KUnknown 4))]]
+--       (KUnknown 5)))
+--   (initFreshCounterAt 10)
+-- :}
+-- (fromList [("a",(* -> (* -> (* -> *)))),("b",(* -> *)),("c",*),("d",*),("e",*)],DeclareType "Complex" ["a","b","c","d"] [DeclareCtor "Complex" [(((a (b c)) d) e)]] ((* -> (* -> (* -> *))) -> ((* -> *) -> (* -> (* -> *)))))
 --
 evalDataTypeKind ::
   KConstEnv
-  -- ^ Mapping of data type to its kind.
+  -- ^ Mapping of data types to its kind
   -> KEnv
   -- ^ Do we need this? Mapping of type var to kind
   -> DeclareType
   -- ^ The data type we're trying to find the kind of
   -> KindCheck (KEnv, DeclareType)
-evalDataTypeKind cenv kenv declare@(DeclareType _ tvs ctors _) = do
+evalDataTypeKind cenv kenv declare@(DeclareType name tvs ctors k) = do
+  -- Add current data type (whose kind is unknown) into const env to handle
+  -- recursive data types.
+  let cenv2 = M.insert name k cenv
   -- Evaluate each constructor's kind, building up the subsitution map.
   (kenv2, ksub2) <- foldl (\kindCheck ctor -> do
                                (kenv', ksub') <- kindCheck
-                               (kenv'', ksub'') <- evalCtorKind cenv kenv' ksub' ctor
+                               (kenv'', ksub'') <- evalCtorKind cenv2 kenv' ksub' ctor
                                -- Compose the new substitution with the old one
                                return (kenv'', ksub'' `composeKSubst` ksub'))
                          (return (kenv, M.empty)) ctors
@@ -156,8 +166,6 @@ replaceKindWithStars (KFun k1 k2) = KFun (replaceKindWithStars k1) (replaceKindW
 replaceKindWithStars _ = Star
 
 -- | Evaluate the kind of a data constructor.
---
--- TODO write tests
 --
 -- >>> evalState (evalCtorKind M.empty M.empty M.empty (DeclareCtor "Just" [TVarK "a" (KUnknown 0)])) (initFreshCounterAt 1)
 -- (fromList [("a",k0)],fromList [])
@@ -231,7 +239,7 @@ evalCtorKind cenv kenv ksub (DeclareCtor _ types) = do
 -- (fromList [("a",(k10 -> (k3 -> k12))),("b",(k2 -> k10)),("c",k2),("d",k3)],fromList [(0,(k10 -> (k3 -> k12))),(1,(k2 -> k10)),(11,(k3 -> k12))],k12)
 --
 evalKindOfType :: KConstEnv -> KEnv -> KSubst -> Type -> KindCheck (KEnv, KSubst, Kind)
-evalKindOfType cenv kenv ksub (TVarK tv (KUnknown kv)) = return (M.insert tv (KUnknown kv) kenv, ksub, KUnknown kv)
+evalKindOfType _ kenv ksub (TVarK tv (KUnknown kv)) = return (M.insert tv (KUnknown kv) kenv, ksub, KUnknown kv)
 evalKindOfType cenv kenv ksub (TConst name k) =
   if M.member name cenv
   then return (kenv, ksub, k)
