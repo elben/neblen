@@ -9,4 +9,3 @@ import Neblen.Main as X
 import Neblen.TypeChecker as X
 import Neblen.Eval as X
 import Neblen.DataTypes as X
-import Neblen.DataTypes2 as X

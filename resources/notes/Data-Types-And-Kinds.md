@@ -1,22 +1,65 @@
-module Neblen.DataTypes2 where
+## Data Types and Kinds
 
-import Neblen.Data
-import Neblen.DataTypes
+Neblen supports data types similar to Haskell data types. Here's the `Maybe` data type:
 
--- Kind unification:
--- https://github.com/purescript/purescript/blob/master/src/Language/PureScript/TypeChecker/Kinds.hs#L58
---
--- Purescript uses KUnknown with generated integer as "kind variables":
--- https://github.com/purescript/purescript/blob/master/src/Language/PureScript/Kinds.hs#L33
---
--- (=:=): https://github.com/purescript/purescript/blob/master/src/Control/Monad/Unify.hs#L120
---
--- Has idea of converting all unknown kinds to Star at the end:
--- https://github.com/purescript/purescript/blob/master/src/Language/PureScript/TypeChecker/Kinds.hs#L149
---
---
+```
+(data-type Maybe (a)
+  Nothing
+  (Just a))
+```
+
+To check that uasge of type constructors (e.g. `Just` and `Nothing`) valid, we use a concept called "kinds".
+
+```haskell
+data Kind = Star
+          | KFun Kind Kind
+```
+
+For showing, we use `*` for `Star`.
+
+`Nothing` has the kind `*`, and `Just` has the kind `* -> *`, since `Just` accepts one type `a` and returns the type `Maybe a`. So, `Maybe Int` has the kind `*`.
+
+In the actual Nelben implementation of kinds, we a kind variable:
+
+```haskell
+data Kind = Star
+          | KFun Kind Kind
+          | KUnknown Int
+```
+
+## Data types in Neblen
+
+In Neblen, we represent data type declarations like this:
+
+```haskell
+-- | Data type declaration.
+data DeclareType = DeclareType Name [TName] [DeclareCtor] Kind
+
+-- | Data type constructor declaration.
+data DeclareCtor = DeclareCtor Name [Type]
+
+-- Maybe data type
+DeclareType "Maybe" ["a"]
+  [DeclareCtor "Nothing" [],
+   DeclareCtor "Just" [TVarK "a" (KUnknown 0)]]
+  (KUnknown 1)
+```
+
+When the program is first parsed, every data type and type constructor has an unknown kind, and so we give it kind variables.
 
 
+
+# References
+
+[Typing Haskell in Haskell](https://web.cecs.pdx.edu/~mpj/thih/)
+
+PureScript implementation:
+- [Kind unification](https://github.com/purescript/purescript/blob/master/src/Language/PureScript/TypeChecker/Kinds.hs#L58)
+- [Kinds](https://github.com/purescript/purescript/blob/master/src/Language/PureScript/Kinds.hs#L33)
+
+# Brain dump
+
+```haskell
 -- Data types
 --
 -- Data types can only be declared at the top level.
@@ -31,14 +74,15 @@ import Neblen.DataTypes
 --   - Its name (e.g. Maybe)
 --   - What its constructors are
 --     - For each constructor, what types it accepts, and what its kinds are
---
+
+
 -- Some examples:
 --
 -- (data-type Person
 --            (Person String Int))
 --
-dtPerson :: DeclareType
-dtPerson = DeclareType "Person" [] [DeclareCtor "Person" [TString,TInt]] (KUnknown 0)
+person :: DeclareType
+person = DeclareType "Person" [] [DeclareCtor "Person" [TString,TInt]] (KUnknown 0)
 --
 -- Maybe:
 -- (data-type Maybe (a)
@@ -604,4 +648,4 @@ far1 = Far (Just (0 :: Int)) 1
 -- complex1 = Complex _ (Just (Right (0 :: Int)))
 
 -- data Fix f = Fold { unFold :: f (Fix f) }
-
+```
