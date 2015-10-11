@@ -9,6 +9,12 @@ import Data.Maybe (fromMaybe)
 import Control.Monad.Trans.State
 import Control.Monad (liftM)
 
+-- = Data types and kind evaluator
+--
+-- TODO explain how kind-finding works!
+--
+-- Neblen supports data types similar to Haskell.
+--
 
 -- | Data type declarations. Separated out from regular expressions.
 --

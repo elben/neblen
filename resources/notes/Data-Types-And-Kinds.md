@@ -1,4 +1,4 @@
-## Data Types and Kinds
+# Data Types and Kinds
 
 Neblen supports data types similar to Haskell data types. Here's the `Maybe` data type:
 
@@ -19,7 +19,9 @@ For showing, we use `*` for `Star`.
 
 `Nothing` has the kind `*`, and `Just` has the kind `* -> *`, since `Just` accepts one type `a` and returns the type `Maybe a`. So, `Maybe Int` has the kind `*`.
 
-In the actual Nelben implementation of kinds, we a kind variable:
+## Finding kinds
+
+In the actual Nelben implementation of kinds, we need kind variables:
 
 ```haskell
 data Kind = Star
@@ -27,9 +29,7 @@ data Kind = Star
           | KUnknown Int
 ```
 
-## Data types in Neblen
-
-In Neblen, we represent data type declarations like this:
+Data type declarations are represented with `DeclareType`, which contains a list of type constructors, or `DeclareCtor`s:
 
 ```haskell
 -- | Data type declaration.
@@ -45,9 +45,162 @@ DeclareType "Maybe" ["a"]
   (KUnknown 1)
 ```
 
-When the program is first parsed, every data type and type constructor has an unknown kind, and so we give it kind variables.
+When the program is first parsed, every data type and type constructor has an unknown kind, and so we give it kind variables like `KUnknown 0`. The goal is now to find the kind of each type variable in the type. In doing so, we would be able to build the kind of the data type itself, and also the type constructors.
+
+### General Strategy
+
+The goal is to find the kind of each type in every type constructor. This is similar to an interpreter or type checker—there are terms (type variables like `a` in `(Just a)`), and we go down into each term and try to figure out its kind, building a mapping of type variables to kinds, and also a substitution mapping of kind variables to kinds.
+
+Look at `evalKindOfType` to see how this is done.
+
+The interesting case is `TApp t1 t2`, because once you evaluate the kind of `t1` and `t2`, you then create a third kind `k3` which is returned by the application. All of this gets remembered in the substitution, like this:
+
+```
+Environment (KEnv):
+t1 : k1
+t2 : k2
+
+Substitutions of kind variables (KSubst):
+k1 : k2 -> k3
+```
+
+Let's follow the example for `ExceptT`:
 
 
+```haskell
+data Either e a = Left e | Right a
+
+data ExceptT e m a = ExceptT m (Either e a)
+
+exceptT = DeclareType "ExceptT" ["e","m","a"]
+            [DeclareCtor "ExceptT"
+              [TApp (TVarK "m" (KUnknown 0))
+                    (TApp (TApp (TConst "Either" (KUnknown 1)) (TVarK "e" (KUnknown 2)))
+                          (TVarK "a" (KUnknown 3)))]]
+          (KUnknown 4)
+```
+
+What is passed into `evalKindOfType` is the term `TApp (TVarK "m" (KUnknown 0)) …` with two maps, `KEnv`, which is the mapping of type vars to kinds, and `KSubst`, which specifies kind variables substitutions:
+
+```
+KEnv:
+EMPTY
+
+KSubst:
+EMPTY
+```
+
+The first non-`TApp` term is reached:
+
+```haskell
+(TVarK "m" (KUnknown 0))
+```
+
+The term `m` is simply added:
+
+```
+KEnv:
+m : k0
+
+KSubst:
+EMPTY
+```
+
+The next term reached is:
+
+```haskell
+(TConst "Either" (KUnknown 1))
+```
+
+We first make sure we know what `Either` is. If we don't, error. Otherwise, assume we don't know it's kind, and let's return the kind variable it has, `k1`.
+
+Next:
+
+```haskell
+(TVarK "e" (KUnknown 2))
+```
+
+And the env is modified:
+
+```
+KEnv:
+m : k0
+e : k2
+
+KSubst:
+EMPTY
+```
+
+Now we're at the first `TApp`, of the last two terms above:
+
+```haskell
+(TApp (TConst "Either" (KUnknown 1)) (TVarK "e" (KUnknown 2)))
+```
+
+Here, we make a new kind variable `k10`, and learn something about `k1`:
+
+```
+KEnv:
+m : k0
+e : k2
+
+KSubst:
+k1 : k2 -> k10
+```
+
+Next:
+
+```haskell
+(TVarK "a" (KUnknown 3))
+```
+
+```
+KEnv:
+m : k0
+e : k2
+a : k3
+
+KSubst:
+k1 : k2 -> k10
+```
+
+Next is the next outer `TApp`, combining all the terms above:
+
+```haskell
+------ (0)
+-- (1)
+(TApp (TApp (TConst "Either" (KUnknown 1))
+            (TVarK "e" (KUnknown 2)))
+      (TVarK "a" (KUnknown 3)))
+```
+
+Remember that the inner `TApp` (marked as `(0)`), we create a return kind `k10`. That is the kind of the `(0)` term. The outer `TApp`, then, has a new return kind `k11`. Our enviornment is:
+
+```
+KEnv:
+m : k0
+e : k2
+a : k3
+
+KSubst:
+k1 : k2 -> k10
+k10 : k3 -> k11
+```
+
+Notice how we can substitute `k10`. We do just that, and get:
+
+```
+KEnv:
+m : k0
+e : k2
+a : k3
+
+KSubst:
+k1 : k2 -> k3 -> k11
+k10 : k3 -> k11
+```
+
+This goes on for every term, until we build a finalize `KSubst` and `KEnv`.
 
 # References
 
@@ -558,35 +711,6 @@ foo = Dallas
 --                      (KFun Star Star)
 
 
--- ===============
--- Kind finder
--- ===============
---
--- Then, we pass this parsed expression into the kind-finder. How the
--- kind-finder works:
---
---   - Recursively evaluate each element, starting with an empty context
---     - Context is map of tvars to its kind
---
---   - If it sees a "standalone" TVarK with unknown kind, set kind to Star
---     - Save this knowledge in a map context
---
---   - If it sees a constant, like "Either", look into a map to see that data
---     type's kind. If doesn't exist, error.
---
---   - If it sees a TApp, evaluate the RHS's kind.
---     - Evaluate the LHS's kind. Unify RHS kind with LHS kind (like function
---       unification in the type level)
---       - If LHS's kind is exactly that, good. Return.
---       - If LHS's kind is unknown, set it to RHS-KIND -> *
---       - If LHS's kind is not RHS-KIND -> *, error.
---
---   - If it sees a TConst, return.
---   - When we pop back off to the DeclareType level, we now know each tvar's kind.
---   - We can now deduce the data type's kind. Maybe we do this somewhere else:
---     - Check that each tvar the data type declares is used.
---     - Find each of their kind, ordered by the data type's tvar declaration order.
---     - Put them together, and you get the data type's kind.
 --
 dtMaybe2 :: DeclareType
 dtMaybe2 = DeclareType "Maybe" ["a"] [DeclareCtor "Nothing" [],
