@@ -16,19 +16,28 @@ Neblen> :t ((fn [x] x) (fn [y] (y true)))
 
 # Development
 
+First, [download and install `stack`](https://github.com/commercialhaskell/stack/blob/master/doc/install_and_upgrade.md).
+
 ```
 cd ~/code/neblen
 
-cabal init sandbox
-cabal install --only-dep
+# Get GHC
+stack install
+
+stack build
 ```
 
-In `ghci`, run `main` to run the REPL. Try the snippets above.
+To run the Neblen REPL:
+
+```
+stack ghci
+>> main
+```
 
 # Tests
 
 ```
-cabal test
+stack test
 
 doctest -isrc -Wall -fno-warn-type-defaults -fno-warn-unused-do-bind src/Neblen/Parser.hs
 ```
