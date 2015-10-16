@@ -30,7 +30,7 @@ stack build
 To run the Neblen REPL:
 
 ```
-stack ghci
+stack ghci neblen:exe:neblen
 >> main
 ```
 

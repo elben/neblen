@@ -1,4 +1,4 @@
-module Neblen.Main where
+module Main where
 
 import Neblen.Data
 import Neblen.Eval
