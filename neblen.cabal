@@ -18,7 +18,7 @@ library
                   , parsec >= 3.1.9
                   , haskeline >= 0.7.1.2
                   , process >= 1.2.0.0
-                  , transformers >= 0.4.3.0
+                  , transformers >= 0.4.2.0
                   -- , transformers >= 0.3
 
                   -- Test deps below are listed here just for development, so
@@ -54,7 +54,7 @@ test-suite neblen-tests
                   , directory >= 1.1
                   , template-haskell >= 2.8
 
-                  , transformers >= 0.4.3.0
+                  , transformers >= 0.4.2.0
                   -- , transformers >= 0.3
                   , containers >= 0.5.0.0
                   , parsec >= 3.1.9
