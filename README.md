@@ -39,7 +39,10 @@ stack ghci neblen:exe:neblen
 ```
 stack test
 
-doctest -isrc -Wall -fno-warn-type-defaults -fno-warn-unused-do-bind src/Neblen/Parser.hs
+# Install doctest
+stack install doctest
+
+stack exec doctest -- -isrc -Wall -fno-warn-type-defaults -fno-warn-unused-do-bind src/Neblen/Parser.hs
 ```
 
 # References

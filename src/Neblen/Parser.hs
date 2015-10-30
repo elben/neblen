@@ -1,7 +1,6 @@
 module Neblen.Parser where
 
 import Neblen.Data
-import Neblen.TypeChecker
 import Text.ParserCombinators.Parsec
 import qualified Control.Applicative as A
 import qualified Data.Set as S
@@ -451,6 +450,82 @@ parseIf = do
   t <- parseExp
   e <- parseBodyOfFun
   return (If p t e)
+
+-- | Parse upper-cased string.
+--
+-- >>> parse parseUpperCasedString "" "F"
+-- Right "F"
+--
+-- >>> parse parseUpperCasedString "" "Foo"
+-- Right "Foo"
+--
+-- >>> parse parseUpperCasedString "" "FooBarFar"
+-- Right "FooBarFar"
+--
+-- >>> isLeft $ parse parseUpperCasedString "" "fooBarFar"
+-- True
+--
+parseUpperCasedString :: Parser String
+parseUpperCasedString = do
+  u <- upper
+  s <- many letter
+  return $ u : s
+
+parseDataTypeWithoutTvars :: Parser (Name,[TName])
+parseDataTypeWithoutTvars = do
+  name <- parseUpperCasedString
+  return (name, [])
+
+parseDataTypeWithTvars :: Parser (Name,[TName])
+parseDataTypeWithTvars = do
+  _ <- char '('
+  name <- parseUpperCasedString
+  tvars <- many (spaces >> many1 lower)
+  _ <- char ')'
+  return (name, tvars)
+
+
+-- | Parse data type name.
+--
+-- >>> parse parseDataTypeName "" "Animal"
+-- Right ("Animal",[])
+--
+-- >>> parse parseDataTypeName "" "(Foo a b c)"
+-- Right ("Foo",["a","b","c"])
+--
+parseDataTypeName :: Parser (Name,[TName])
+parseDataTypeName = parseDataTypeWithoutTvars <|> parseDataTypeWithTvars
+
+-- | Parse data type.
+--
+-- >>> parse parseDataType "" "(data-type Animal Dog Cat Cow)"
+-- Right (DeclareType "Animal" [] [DeclareCtor "Dog" [],DeclareCtor "Cat" [],DeclareCtor "Cow" []] k?)
+--
+-- >>> parse parseDataType "" "(data-type (Maybe a) (Just a) Nothing)"
+-- Right (DeclareType "Maybe" ["a"] [DeclareCtor "Just" [a],DeclareCtor "Nothing" []] k?)
+--
+-- Invalid data type, but it is parsed. Should error in type check.
+-- >>> parse parseDataType "" "(data-type (Maybe a) (Just a b c) Nothing)"
+-- Right (DeclareType "Maybe" ["a"] [DeclareCtor "Just" [a,b,c],DeclareCtor "Nothing" []] k?)
+--
+-- >>> parse parseDataType "" "(data-type (Tree a) (Leaf a) (Branch (Tree a) (Tree a)))"
+-- ???
+--
+parseDataType :: Parser DeclareType
+parseDataType = do
+  parseStartsListWith "data-type"
+  (name, tvars) <- parseDataTypeName
+  _ <- spaces
+
+  -- TODO We can't use `parseDataTypeName` here, to handle deep structures like
+  -- Tree example
+  ctorPairs <- sepBy (parseDataTypeName <?> "constructors") skipSpaces1
+  let ctors = fmap
+                (\(n,tvs) -> DeclareCtor n (fmap (\tv -> TVarK tv KUnknownInit) tvs))
+                ctorPairs
+  _ <- char ')'
+  return (DeclareType name tvars [] KUnknownInit)
+  return (DeclareType name tvars ctors KUnknownInit)
 
 -- | Parse expression.
 --

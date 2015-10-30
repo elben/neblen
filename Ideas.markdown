@@ -11,9 +11,6 @@ data List a = NilList | (a :. List a)
 data Tree a = Branch (Tree a) (Tree a)
             | Leaf a
 
-This is just a type alias
-(data-type Name String)
-
 Maybe : * -> *
 (data-type (Maybe a)
   (Just a)

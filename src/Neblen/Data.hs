@@ -48,6 +48,8 @@ data Kind = Star
           | KFun Kind Kind
           -- | Unresolved kind with free variable counter.
           | KUnknown Int
+          -- | Unresolved, waiting for free variable counter.
+          | KUnknownInit
   deriving (Eq, Ord)
 
 data Type = TUnit
@@ -131,4 +133,5 @@ instance Show Kind where
   show Star = "*"
   show (KFun k1 k2) = "(" ++ show k1 ++ " -> " ++ show k2 ++ ")"
   show (KUnknown i) = "k" ++ show i
+  show KUnknownInit = "k?"
 
