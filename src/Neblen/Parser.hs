@@ -462,6 +462,9 @@ parseIf = do
 -- >>> parse parseUpperCasedString "" "FooBarFar"
 -- Right "FooBarFar"
 --
+-- >>> parse parseUpperCasedString "" "FooBar Far"
+-- Right "FooBar"
+--
 -- >>> isLeft $ parse parseUpperCasedString "" "fooBarFar"
 -- True
 --
@@ -496,6 +499,60 @@ parseDataTypeWithTvars = do
 parseDataTypeName :: Parser (Name,[TName])
 parseDataTypeName = parseDataTypeWithoutTvars <|> parseDataTypeWithTvars
 
+-- parseDatatTypeWithTapps :: Parser DeclareCtor
+
+-- | Parse data type constructor.
+--
+-- >>> parse parseDataTypeConstructor "" "Nothing"
+-- Right (DeclareCtor "Nothing" [])
+--
+-- >>> parse parseDataTypeConstructor "" "(Nothing)"
+-- Right (DeclareCtor "Nothing" [])
+--
+-- >>> parse parseDataTypeConstructor "" "(Just a)"
+-- Right (DeclareCtor "Just" [a])
+--
+-- >>> parse parseDataTypeConstructor "" "(Just a b c)"
+-- Right (DeclareCtor "Just" [a,b,c])
+--
+-- >>> parse parseDataTypeConstructor "" "(Branch (Tree a) (Tree a))"
+-- Right (DeclareCtor "Branch" [(Tree a),(Tree a)])
+--
+-- >>> parse parseDataTypeConstructor "" "(Branch (Tree a) (Foo a b c))"
+-- Right (DeclareCtor "Branch" [(Tree a),(((Foo a) b) c)])
+--
+-- Below, Foo is another abstract data type. This is allowed:
+--
+--  Foo = Bar | Far
+--  Tree a = Leaf a | Branch (Tree a) Foo -- refers to the Foo above
+--
+-- >>> parse parseDataTypeConstructor "" "(Branch (Tree a) Foo)"
+-- Right (DeclareCtor "Branch" [(Tree a),Foo])
+--
+-- >>> isLeft $ parse parseDataTypeConstructor "" "(abc)"
+-- True
+--
+-- >>> isLeft $ parse parseDataTypeConstructor "" "abc"
+-- True
+--
+parseDataTypeConstructor :: Parser DeclareCtor
+parseDataTypeConstructor = parseDataTypeConstructorSingleton <|> parseDataTypeConstructorWithParens
+
+parseDataTypeConstructorWithParens :: Parser DeclareCtor
+parseDataTypeConstructorWithParens = do
+  -- Parse type here, to get the TVarK and TApp and TConst.
+  _ <- char '('
+  name <- parseUpperCasedString
+  _ <- spaces
+  types <- parseMany parseTypeKind
+  _ <- char ')'
+  return (DeclareCtor name types)
+
+parseDataTypeConstructorSingleton :: Parser DeclareCtor
+parseDataTypeConstructorSingleton = do
+  name <- parseUpperCasedString
+  return (DeclareCtor name [])
+
 -- | Parse data type.
 --
 -- >>> parse parseDataType "" "(data-type Animal Dog Cat Cow)"
@@ -509,22 +566,18 @@ parseDataTypeName = parseDataTypeWithoutTvars <|> parseDataTypeWithTvars
 -- Right (DeclareType "Maybe" ["a"] [DeclareCtor "Just" [a,b,c],DeclareCtor "Nothing" []] k?)
 --
 -- >>> parse parseDataType "" "(data-type (Tree a) (Leaf a) (Branch (Tree a) (Tree a)))"
--- ???
+-- Right (DeclareType "Tree" ["a"] [DeclareCtor "Leaf" [a],DeclareCtor "Branch" [(Tree a),(Tree a)]] k?)
+--
+-- >>> parse parseDataType "" "(data-type (Tree a) (Leaf a) (Branch (Tree a) Foo))"
+-- Right (DeclareType "Tree" ["a"] [DeclareCtor "Leaf" [a],DeclareCtor "Branch" [(Tree a),Foo]] k?)
 --
 parseDataType :: Parser DeclareType
 parseDataType = do
   parseStartsListWith "data-type"
   (name, tvars) <- parseDataTypeName
   _ <- spaces
-
-  -- TODO We can't use `parseDataTypeName` here, to handle deep structures like
-  -- Tree example
-  ctorPairs <- sepBy (parseDataTypeName <?> "constructors") skipSpaces1
-  let ctors = fmap
-                (\(n,tvs) -> DeclareCtor n (fmap (\tv -> TVarK tv KUnknownInit) tvs))
-                ctorPairs
+  ctors <- parseMany parseDataTypeConstructor
   _ <- char ')'
-  return (DeclareType name tvars [] KUnknownInit)
   return (DeclareType name tvars ctors KUnknownInit)
 
 -- | Parse expression.
@@ -650,3 +703,64 @@ parseType =
 
 parseTypes :: Parser [Type]
 parseTypes = parseMany parseType
+
+--------------------------
+-- Parse "kind world" types, which differs (for now) from "non-kind" types
+
+-- | Parse type constant with unknown kind.
+--
+-- >>> parse parseTConst "" "Tree"
+-- Right Tree
+--
+-- >>> isLeft $ parse parseTConst "" "a"
+-- True
+--
+-- >>> isLeft $ parse parseTConst "" "(Tree a)"
+-- True
+--
+parseTConst :: Parser Type
+parseTConst = do
+  name <- parseUpperCasedString
+  return (TConst name KUnknownInit)
+
+-- | Parse type variable with unknown kind.
+--
+-- >>> parse parseTVarK "" "abc"
+-- Right abc
+--
+-- >>> isLeft $ parse parseTVarK "" "Abc"
+-- True
+--
+parseTVarK :: Parser Type
+parseTVarK = do
+  tname <- many1 lower
+  return (TVarK tname KUnknownInit)
+
+-- | Parse type application with unknown kinds.
+--
+-- >>> parse parseTApp "" "(Tree a)"
+-- Right (Tree a)
+--
+-- >>> parse parseTApp "" "(Foo a b c)"
+-- Right (((Foo a) b) c)
+--
+-- >>> isLeft $ parse parseTApp "" "(a b)"
+-- True
+--
+parseTApp :: Parser Type
+parseTApp = do
+  _ <- char '('
+  ctor <- parseTConst
+  _ <- spaces
+  types <- parseMany parseTypeKind
+  _ <- char ')'
+  return (buildTAppStack (ctor:types))
+
+buildTAppStack :: [Type] -> Type
+buildTAppStack (lhs:[rhs]) = TApp lhs rhs
+buildTAppStack (a:b:rest) = buildTAppStack (TApp a b:rest)
+buildTAppStack _ = error "buildTAppStack requires at least two arguments"
+
+parseTypeKind :: Parser Type
+parseTypeKind = parseTConst <|> parseTVarK <|> parseTApp
+

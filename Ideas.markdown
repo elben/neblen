@@ -1,4 +1,8 @@
 
+# Error messages
+
+Understandable parser error messages. Need to carry around state while parsing? See Elm blog post and link to HN comment.
+
 # Data types
 
 Algebraic data types, per Haskell.
@@ -95,4 +99,5 @@ http://docs.racket-lang.org/reference/define-struct.html
 - Compiled to JS?
   - See these compilers for inspiration:
     - [ClojureScript](https://github.com/clojure/clojurescript/blob/master/src/main/clojure/cljs/compiler.cljc)
+
 

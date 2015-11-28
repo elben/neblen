@@ -25,6 +25,8 @@ cd ~/code/neblen
 stack install
 
 stack build
+
+stack ghci
 ```
 
 To run the Neblen REPL:

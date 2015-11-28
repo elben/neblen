@@ -135,3 +135,11 @@ instance Show Kind where
   show (KUnknown i) = "k" ++ show i
   show KUnknownInit = "k?"
 
+
+showKind :: Type -> String
+showKind (TFun ts) = "(-> " ++ unwords (map showKind ts) ++ ")"
+showKind (TList a) = "[" ++ showKind a ++ "]"
+showKind (TConst n k) = n ++ " : " ++ show k
+showKind (TVarK n k) = n ++ " : " ++ show k
+showKind (TApp t1 t2) = "(" ++ showKind t1 ++ " " ++ showKind t2 ++ ")"
+showKind t = show t ++ " : " ++ show Star
