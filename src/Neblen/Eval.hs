@@ -9,6 +9,8 @@ import qualified Data.Map.Strict as M
 import Control.Monad
 import Data.Maybe (fromMaybe)
 
+import Debug.Trace
+
 type EvalEnv = M.Map Name Exp
 
 type Answer = (Exp, Type)
@@ -45,8 +47,10 @@ defaultEnv = M.fromList [
  ,("*", Fun [Var "a",Var "b"] (BinOp "*" (Var "a") (Var "b")))
 
  ,("and", Fun [Var "a",Var "b"] (BinOp "and" (Var "a") (Var "b")))
- ,("or", Fun [Var "a",Var "b"] (BinOp "or" (Var "a") (Var "b")))
+ ,("or",  Fun [Var "a",Var "b"] (BinOp "or" (Var "a") (Var "b")))
  ,("xor", Fun [Var "a",Var "b"] (BinOp "xor" (Var "a") (Var "b")))
+
+ ,("print", Fun [Var "a"] (PrimitiveOp "print" [Var "a"]))
  ]
 
 -- | Evaluates expression.
@@ -107,6 +111,19 @@ eval' env expr = case expr of
       Lit (BoolV True) -> eval' env t
       Lit (BoolV False) -> eval' env e
       _ -> neblenError expr
+
+  PrimitiveOp fn args ->
+    case fn of
+      -- TODO: how to tell interpreter to print to the screen without using
+      -- Debug.Trace? Would need to bring in a heavy-lifting State typeclass
+      -- with a list of things to print to the screen as part of the return
+      -- value?
+      --
+      -- TODO: 'print' should only take string, so we need to type-check that.
+      "print" -> do
+        let a = (head args)
+        let x = eval' env a
+        trace (show x) Unit
 
   BinOp fn a b -> case fn of
     "+" -> Lit (IntV (extractInt (eval' env a) + extractInt (eval' env b)))

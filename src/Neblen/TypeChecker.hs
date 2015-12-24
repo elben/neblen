@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module Neblen.TypeChecker where
 
 import Neblen.Data
@@ -90,7 +88,7 @@ import Control.Monad.Trans.Except
 
 -- Monad transformer stack for TypeCheck:
 --
---   State (fresh variable counter)
+--   State (fresh type variable counter)
 --     ExceptT (TypeError)
 --       a
 --
@@ -99,19 +97,8 @@ type TypeCheck a = ExceptT TypeError (State FreshCounter) a
 -- Mapping of variables (value vars, *not* type variables) to its type.
 type TEnv = M.Map Name TypeScheme
 
--- Type variable.
-type TName = String
-
 -- Type variable substitutions. Mapping of type variables to its type.
 type Subst = M.Map TName Type
-
-data Type = TInt
-          | TBool
-          | TString
-          | TFun [Type]
-          | TList Type
-          | TVar TName
-  deriving (Eq, Ord) -- Ord for Set functions
 
 -- Type schemes is a way to allow let-polymorphism (ML-style polymorphism):
 -- functions can be instantiated with different types in the same body. See
@@ -125,8 +112,6 @@ data TypeError = Mismatch Type Type
                | InfiniteType Type Type -- InfiniteType TVar Type
                | GenericTypeError (Maybe String)
   deriving (Eq)
-
-newtype FreshCounter = FreshCounter { getFreshCounter :: Int }
 
 -- Something is Substitutable if you can apply the given Subst to it, substituting
 -- type variables in 't' with its mapping in the Subst.
@@ -431,6 +416,8 @@ check tenv s e = case e of
     s3 <- unify (apply s2 fnT) (apply s2 (TFun (bodyT : [retT])))
     return (composeAll [s3, s2, s1, s], apply s3 retT)
 
+  CtorApp n exprs -> return (s, TInt)
+
   BinOp{} -> error "Shouldn't need to type check BinOps."
   Def{} -> error "TODO"
 
@@ -545,6 +532,8 @@ defaultTEnv = M.fromList [
  ,("and", Forall [] (TFun [TBool,TBool,TBool]))
  ,("or", Forall [] (TFun [TBool,TBool,TBool]))
  ,("xor", Forall [] (TFun [TBool,TBool,TBool]))
+
+ ,("print", Forall [] (TFun [TString,TUnit]))
   ]
 
 emptyTEnv :: TEnv
@@ -589,9 +578,6 @@ emptyGenericTypeError = GenericTypeError Nothing
 genericTypeError :: String -> TypeError
 genericTypeError msg = GenericTypeError (Just msg)
 
-initFreshCounter :: FreshCounter
-initFreshCounter = FreshCounter { getFreshCounter = 0 }
-
 ------------------------------------------
 -- Helpers to run the monad transformers.
 ------------------------------------------
@@ -611,14 +597,6 @@ runWithFreshCounter e = evalState (runExceptT e) initFreshCounter
 ------------------------------------------
 -- Show instances
 ------------------------------------------
-
-instance Show Type where
-  show TInt = "Int"
-  show TBool = "Bool"
-  show TString = "String"
-  show (TFun ts) = "(-> " ++ unwords (map show ts) ++ ")"
-  show (TList a) = "[" ++ show a ++ "]"
-  show (TVar n) = n
 
 instance Show TypeScheme where
   show (Forall tvs t) = "∀:" ++ show tvs ++ " " ++ show t

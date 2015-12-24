@@ -3,24 +3,27 @@ version:            0.1.0.0
 build-type:         Simple
 cabal-version:      >= 1.10
 
-library
-  hs-source-dirs:   src
-  exposed-modules:  Neblen
-                    Neblen.Compiler
-                    Neblen.Parser
+executable neblen
+  default-language: Haskell2010
+  hs-source-dirs:   src src/Neblen
+  main-is:          Main.hs
+  other-modules:    Neblen.Compiler
                     Neblen.Data
+                    Neblen.DataTypes
                     Neblen.Eval
+                    Neblen.Parser
+                    Neblen.TypeChecker
+                    Neblen.Utils
 
   build-depends:    base == 4.*
-                  , containers >= 0.5.0.0
                   , array >= 0.5.0.0
+                  , containers >= 0.5.0.0
                   , deepseq >= 1.3.0.0
-                  , parsec >= 3.1.9
                   , haskeline >= 0.7.1.2
+                  , parsec >= 3.1.9
                   , process >= 1.2.0.0
                   , transformers >= 0.4.2.0
                   -- , transformers >= 0.3
-
                   -- Test deps below are listed here just for development, so
                   -- that ghc-mod picks it up.
                   , HUnit >= 1.2 && < 1.3
@@ -36,34 +39,38 @@ library
                     -fno-warn-unused-do-bind
                     -fno-warn-unused-imports
                     -fno-warn-type-defaults
-  default-language: Haskell2010
 
 test-suite neblen-tests
-  type: exitcode-stdio-1.0
-  main-is: TestSuite.hs
   default-language: Haskell2010
+  type: exitcode-stdio-1.0
+
+  hs-source-dirs:   src src/Neblen tests
+  main-is:          TestSuite.hs
+  other-modules:    Neblen.Data
+                    Neblen.Eval
+                    Neblen.Eval.Tests
+                    Neblen.Parser
+                    Neblen.TypeChecker
+                    Neblen.TypeChecker.Tests
+                    Neblen.Utils
 
   build-depends:    base == 4.*
                   , HUnit >= 1.2 && < 1.3
                   , QuickCheck >= 2.0
+                  , containers >= 0.5.0.0
+                  , directory >= 1.1
+                  , filepath >= 1.3
+                  , parsec >= 3.1.9
+                  , template-haskell >= 2.8
                   , test-framework >= 0.8 && < 0.9
                   , test-framework-hunit >= 0.3.0
                   , test-framework-quickcheck2 >= 0.3.0
-                  -- , doctest >= 0.9.13 && <= 0.10.1
-                  , filepath >= 1.3
-                  , directory >= 1.1
-                  , template-haskell >= 2.8
-
                   , transformers >= 0.4.2.0
-                  -- , transformers >= 0.3
-                  , containers >= 0.5.0.0
-                  , parsec >= 3.1.9
-
+                  -- , doctest >= 0.9.13 && <= 0.10.1
   ghc-options:      -threaded
                     -Wall
                     -fno-warn-unused-binds
                     -fno-warn-unused-do-bind
                     -fno-warn-unused-imports
                     -fno-warn-type-defaults
-  hs-source-dirs: src tests
 

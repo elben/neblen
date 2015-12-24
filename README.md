@@ -30,7 +30,7 @@ stack build
 To run the Neblen REPL:
 
 ```
-stack ghci
+stack ghci neblen:exe:neblen
 >> main
 ```
 
@@ -39,7 +39,10 @@ stack ghci
 ```
 stack test
 
-doctest -isrc -Wall -fno-warn-type-defaults -fno-warn-unused-do-bind src/Neblen/Parser.hs
+# Install doctest
+stack install doctest
+
+stack exec doctest -- -isrc -Wall -fno-warn-type-defaults -fno-warn-unused-do-bind src/Neblen/Parser.hs
 ```
 
 # References
