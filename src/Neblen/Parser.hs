@@ -6,6 +6,8 @@ import qualified Control.Applicative as A
 import qualified Data.Set as S
 import Control.Monad
 
+import Debug.Trace
+
 -- $setup
 -- >>> import Data.Either
 

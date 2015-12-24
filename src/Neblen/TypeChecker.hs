@@ -88,7 +88,7 @@ import Control.Monad.Trans.Except
 
 -- Monad transformer stack for TypeCheck:
 --
---   State (fresh variable counter)
+--   State (fresh type variable counter)
 --     ExceptT (TypeError)
 --       a
 --
@@ -532,6 +532,8 @@ defaultTEnv = M.fromList [
  ,("and", Forall [] (TFun [TBool,TBool,TBool]))
  ,("or", Forall [] (TFun [TBool,TBool,TBool]))
  ,("xor", Forall [] (TFun [TBool,TBool,TBool]))
+
+ ,("print", Forall [] (TFun [TString,TUnit]))
   ]
 
 emptyTEnv :: TEnv

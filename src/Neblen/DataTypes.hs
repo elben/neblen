@@ -121,11 +121,12 @@ evalDataTypeKind ::
   -> DeclareType
   -- ^ The data type we're trying to find the kind of
   -> KindCheck (KEnv, DeclareType)
+  -- ^ Returns the new KEnv and DeclareType, with its kinds filled in
 evalDataTypeKind cenv kenv (DeclareType name tvs ctors k) = do
   -- Add current data type (whose kind is unknown) into const env to handle
   -- recursive data types.
   let cenv2 = M.insert name k cenv
-  -- Evaluate each constructor's kind, building up the subsitution map.
+  -- Evaluate each constructor's kind, building up the substitution map.
   (kenv2, ksub2) <- foldl (\kindCheck ctor -> do
                                (kenv', ksub') <- kindCheck
                                (kenv'', ksub'') <- evalCtorKind cenv2 kenv' ksub' ctor

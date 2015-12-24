@@ -23,8 +23,10 @@ data Exp = Lit Value
          | UnaryApp Exp Exp  -- ^ UnaryApp (Fun or Var) (Argument value)
          | Let Exp Exp Exp   -- ^ Let (Var "x") (Value of x) Body.
          | If Exp Exp Exp    -- ^ If (Predicate : Bool) (Then clause) (Else clause)
-         | BinOp String Exp Exp
+         | BinOp String Exp Exp     -- ^ Primitive function with 2 arguments
+         | PrimitiveOp String [Exp] -- ^ Primitive function with n arguments
          | CtorApp Exp [Exp] -- CtorApp DataCtor [Exp]
+         | Unit
   deriving (Show, Eq)
 
 -- Type variable.
@@ -126,7 +128,8 @@ instance Show Type where
   show (TList a) = "[" ++ show a ++ "]"
   show (TVar n) = n
   show (TConst n _) = n
-  show (TVarK n _) = n
+  -- show (TVarK n _) = n
+  show (TVarK n k) = n ++ " : " ++ show k
   show (TApp t1 t2) = "(" ++ show t1 ++ " " ++ show t2 ++ ")"
 
 instance Show Kind where
