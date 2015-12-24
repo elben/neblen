@@ -267,6 +267,28 @@ nextFreshCounter = do
   put s{getFreshCounter = getFreshCounter s + 1}
   return $ getFreshCounter s
 
+-- Given a data type declaration, return a monad in which the KUnknowns are replaced.
+replaceKUnknownInitsDeclareType :: DeclareType -> KindCheck DeclareType
+replaceKUnknownInitsDeclareType (DeclareType name tvs ctors k) = do
+  ctors' <- mapM replaceKUnknownsInDeclareCtorWith ctors
+  k' <- replaceKUnknownInit k
+  return (DeclareType name tvs ctors' k')
+
+replaceKUnknownsInDeclareCtorWith :: DeclareCtor -> KindCheck DeclareCtor
+replaceKUnknownsInDeclareCtorWith (DeclareCtor name types) = do
+  filledTypes <- mapM replaceKUnknownTVarK types
+  return (DeclareCtor name filledTypes)
+
+replaceKUnknownTVarK :: Type -> KindCheck Type
+replaceKUnknownTVarK (TVarK name k) = do
+  k' <- replaceKUnknownInit k
+  return $ TVarK name k'
+replaceKUnknownTVarK tvark = return tvark
+
+replaceKUnknownInit :: Kind -> KindCheck Kind
+replaceKUnknownInit KUnknownInit = liftM KUnknown nextFreshCounter
+replaceKUnknownInit k = return k
+
 -- TODO can eventually combine as `Substitutable a t`?
 class KSubstitutable k where
   kapply :: KSubst -> k -> k
@@ -275,6 +297,7 @@ instance KSubstitutable Kind where
   kapply _ Star = Star
   kapply ksub (KFun k1 k2) = KFun (kapply ksub k1) (kapply ksub k2)
   kapply ksub (KUnknown i) = fromMaybe (KUnknown i) (M.lookup i ksub)
+  kapply _ KUnknownInit = KUnknownInit
 
 instance KSubstitutable KEnv where
   kapply ksub = M.map (kapply ksub)

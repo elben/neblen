@@ -538,9 +538,13 @@ parseDataTypeName = parseDataTypeWithoutTvars <|> parseDataTypeWithTvars
 parseDataTypeConstructor :: Parser DeclareCtor
 parseDataTypeConstructor = parseDataTypeConstructorSingleton <|> parseDataTypeConstructorWithParens
 
+-- | Parse data type constructors.
+--
+-- >>> parse parseDataTypeConstructorWithParens "" "(Branch (Tree a) (Foo a b c))"
+-- Right (DeclareCtor "Branch" [(Tree a),(((Foo a) b) c)])
+--
 parseDataTypeConstructorWithParens :: Parser DeclareCtor
 parseDataTypeConstructorWithParens = do
-  -- Parse type here, to get the TVarK and TApp and TConst.
   _ <- char '('
   name <- parseUpperCasedString
   _ <- spaces
@@ -570,6 +574,9 @@ parseDataTypeConstructorSingleton = do
 --
 -- >>> parse parseDataType "" "(data-type (Tree a) (Leaf a) (Branch (Tree a) Foo))"
 -- Right (DeclareType "Tree" ["a"] [DeclareCtor "Leaf" [a],DeclareCtor "Branch" [(Tree a),Foo]] k?)
+--
+-- >>> parse parseDataType "" "(data-type (Either a b) (Left a) (Right b))"
+-- Right (DeclareType "Either" ["a","b"] [DeclareCtor "Left" [a],DeclareCtor "Right" [b]] k?)
 --
 parseDataType :: Parser DeclareType
 parseDataType = do

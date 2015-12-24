@@ -1,7 +1,7 @@
-
 module Neblen.Utils where
 
 import Neblen.Data
+import qualified Data.List as L
 
 -- | Converts the AST to the original Neblen program.
 --
@@ -47,7 +47,9 @@ toLisp (UnaryApp fn body) = "(" ++ toLisp fn ++ " " ++ toLisp body ++ ")"
 toLisp (Let v e body) = "(let [" ++ toLisp v ++ " " ++ toLisp e ++ "] " ++ toLisp body ++ ")"
 toLisp (If p t e) = "(if " ++ toLisp p ++ " " ++ toLisp t ++ " " ++ toLisp e ++ ")"
 toLisp (BinOp f a b) = "(" ++ f ++ " " ++ toLisp a ++ " " ++ toLisp b ++ ")"
--- toLisp (CtorApp n exprs) = "(" ++ n ++ " " ++ unwords (map toLisp exprs) ++ ")"
+toLisp (PrimitiveOp f args) = "(" ++ f ++ " " ++ unwords (fmap toLisp args) ++ ")"
+toLisp (CtorApp n exprs) = "(" ++ toLisp n ++ " " ++ unwords (map toLisp exprs) ++ ")"
+toLisp Unit = ""
 
 -- | Pretty-format a Neblen program.
 pretty :: String -> String
