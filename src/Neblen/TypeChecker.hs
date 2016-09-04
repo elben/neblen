@@ -416,7 +416,11 @@ check tenv s e = case e of
     s3 <- unify (apply s2 fnT) (apply s2 (TFun (bodyT : [retT])))
     return (composeAll [s3, s2, s1, s], apply s3 retT)
 
-  CtorApp n exprs -> return (s, TInt)
+  -- This is the primitive data representation of data types.  Already
+  -- type-checked when the data constructor was applied. There is no way to
+  -- actually type in the primitive form of a data type (e.g. "Maybe" is not a
+  -- value to be type-checked); you have to go through the constructor.
+  Data name exprs -> error "Shouldn't need to type check Data."
 
   BinOp{} -> error "Shouldn't need to type check BinOps."
   Def{} -> error "TODO"

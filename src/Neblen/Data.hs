@@ -25,7 +25,6 @@ data Exp = Lit Value
          | If Exp Exp Exp    -- ^ If (Predicate : Bool) (Then clause) (Else clause)
          | BinOp String Exp Exp     -- ^ Primitive function with 2 arguments
          | PrimitiveOp String [Exp] -- ^ Primitive function with n arguments
-         | CtorApp Exp [Exp] -- CtorApp DataCtor [Exp]
          | Unit
   deriving (Show, Eq)
 

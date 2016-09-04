@@ -48,7 +48,6 @@ toLisp (Let v e body) = "(let [" ++ toLisp v ++ " " ++ toLisp e ++ "] " ++ toLis
 toLisp (If p t e) = "(if " ++ toLisp p ++ " " ++ toLisp t ++ " " ++ toLisp e ++ ")"
 toLisp (BinOp f a b) = "(" ++ f ++ " " ++ toLisp a ++ " " ++ toLisp b ++ ")"
 toLisp (PrimitiveOp f args) = "(" ++ f ++ " " ++ unwords (fmap toLisp args) ++ ")"
-toLisp (CtorApp n exprs) = "(" ++ toLisp n ++ " " ++ unwords (map toLisp exprs) ++ ")"
 toLisp Unit = ""
 
 -- | Pretty-format a Neblen program.
