@@ -16,3 +16,4 @@ cabal.sandbox.config
 *.hp
 .stack-work/
 .DS_Store
+codex.tags
