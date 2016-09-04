@@ -52,7 +52,7 @@ type KindCheck a = State FreshCounter a
 --  (data-type Maybe (a) Nothing (Just a))
 --
 -- >>> evalState (evalDataTypeKind M.empty M.empty (DeclareType "Maybe" ["a"] [DeclareCtor "Nothing" [], DeclareCtor "Just" [TVarK "a" (KUnknown 0)]] (KUnknown 1))) (initFreshCounterAt 10)
--- (fromList [("a",*)],DeclareType "Maybe" ["a"] [DeclareCtor "Nothing" [],DeclareCtor "Just" [a]] (* -> *))
+-- (fromList [("a",*)],DeclareType "Maybe" ["a"] [DeclareCtor "Nothing" [],DeclareCtor "Just" [a : k0]] (* -> *))
 --
 -- Either:
 --
@@ -60,7 +60,7 @@ type KindCheck a = State FreshCounter a
 --   (data-type Either (a b) (Left a) (Right b))
 --
 -- >>> evalState (evalDataTypeKind M.empty M.empty (DeclareType "Either" ["a", "b"] [DeclareCtor "Left" [TVarK "a" (KUnknown 0)], DeclareCtor "Just" [TVarK "b" (KUnknown 1)]] (KUnknown 2))) (initFreshCounterAt 10)
--- (fromList [("a",*),("b",*)],DeclareType "Either" ["a","b"] [DeclareCtor "Left" [a],DeclareCtor "Just" [b]] (* -> (* -> *)))
+-- (fromList [("a",*),("b",*)],DeclareType "Either" ["a","b"] [DeclareCtor "Left" [a : k0],DeclareCtor "Just" [b : k1]] (* -> (* -> *)))
 --
 -- ExceptT:
 --
@@ -75,7 +75,7 @@ type KindCheck a = State FreshCounter a
 --       (KUnknown 4)))
 --   (initFreshCounterAt 10)
 -- :}
--- (fromList [("a",*),("e",*),("m",(* -> *))],DeclareType "ExceptT" ["e","m","a"] [DeclareCtor "ExceptT" [(m ((Either e) a))]] (* -> ((* -> *) -> (* -> *))))
+-- (fromList [("a",*),("e",*),("m",(* -> *))],DeclareType "ExceptT" ["e","m","a"] [DeclareCtor "ExceptT" [(m : k0 ((Either e : k2) a : k3))]] (* -> ((* -> *) -> (* -> *))))
 --
 -- Tree:
 --
@@ -93,7 +93,7 @@ type KindCheck a = State FreshCounter a
 --      (KUnknown 1)))
 --   (initFreshCounterAt 10)
 -- :}
--- (fromList [("a",*)],DeclareType "Tree" ["a"] [DeclareCtor "Leaf" [a],DeclareCtor "Branch" [(Tree a),(Tree a)]] (* -> *))
+-- (fromList [("a",*)],DeclareType "Tree" ["a"] [DeclareCtor "Leaf" [a : k0],DeclareCtor "Branch" [(Tree a : k0),(Tree a : k0)]] (* -> *))
 --
 -- Complex type:
 --
@@ -111,7 +111,7 @@ type KindCheck a = State FreshCounter a
 --       (KUnknown 5)))
 --   (initFreshCounterAt 10)
 -- :}
--- (fromList [("a",(* -> (* -> (* -> *)))),("b",(* -> *)),("c",*),("d",*),("e",*)],DeclareType "Complex" ["a","b","c","d"] [DeclareCtor "Complex" [(((a (b c)) d) e)]] ((* -> (* -> (* -> *))) -> ((* -> *) -> (* -> (* -> *)))))
+-- (fromList [("a",(* -> (* -> (* -> *)))),("b",(* -> *)),("c",*),("d",*),("e",*)],DeclareType "Complex" ["a","b","c","d"] [DeclareCtor "Complex" [(((a : k0 (b : k1 c : k2)) d : k3) e : k4)]] ((* -> (* -> (* -> *))) -> ((* -> *) -> (* -> (* -> *)))))
 --
 evalDataTypeKind ::
   KConstEnv

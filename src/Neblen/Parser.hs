@@ -6,8 +6,6 @@ import qualified Control.Applicative as A
 import qualified Data.Set as S
 import Control.Monad
 
-import Debug.Trace
-
 -- $setup
 -- >>> import Data.Either
 
@@ -512,16 +510,16 @@ parseDataTypeName = parseDataTypeWithoutTvars <|> parseDataTypeWithTvars
 -- Right (DeclareCtor "Nothing" [])
 --
 -- >>> parse parseDataTypeConstructor "" "(Just a)"
--- Right (DeclareCtor "Just" [a])
+-- Right (DeclareCtor "Just" [a : k?])
 --
 -- >>> parse parseDataTypeConstructor "" "(Just a b c)"
--- Right (DeclareCtor "Just" [a,b,c])
+-- Right (DeclareCtor "Just" [a : k?,b : k?,c : k?])
 --
 -- >>> parse parseDataTypeConstructor "" "(Branch (Tree a) (Tree a))"
--- Right (DeclareCtor "Branch" [(Tree a),(Tree a)])
+-- Right (DeclareCtor "Branch" [(Tree a : k?),(Tree a : k?)])
 --
 -- >>> parse parseDataTypeConstructor "" "(Branch (Tree a) (Foo a b c))"
--- Right (DeclareCtor "Branch" [(Tree a),(((Foo a) b) c)])
+-- Right (DeclareCtor "Branch" [(Tree a : k?),(((Foo a : k?) b : k?) c : k?)])
 --
 -- Below, Foo is another abstract data type. This is allowed:
 --
@@ -529,7 +527,7 @@ parseDataTypeName = parseDataTypeWithoutTvars <|> parseDataTypeWithTvars
 --  Tree a = Leaf a | Branch (Tree a) Foo -- refers to the Foo above
 --
 -- >>> parse parseDataTypeConstructor "" "(Branch (Tree a) Foo)"
--- Right (DeclareCtor "Branch" [(Tree a),Foo])
+-- Right (DeclareCtor "Branch" [(Tree a : k?),Foo])
 --
 -- >>> isLeft $ parse parseDataTypeConstructor "" "(abc)"
 -- True
@@ -543,7 +541,7 @@ parseDataTypeConstructor = parseDataTypeConstructorSingleton <|> parseDataTypeCo
 -- | Parse data type constructors.
 --
 -- >>> parse parseDataTypeConstructorWithParens "" "(Branch (Tree a) (Foo a b c))"
--- Right (DeclareCtor "Branch" [(Tree a),(((Foo a) b) c)])
+-- Right (DeclareCtor "Branch" [(Tree a : k?),(((Foo a : k?) b : k?) c : k?)])
 --
 parseDataTypeConstructorWithParens :: Parser DeclareCtor
 parseDataTypeConstructorWithParens = do
@@ -565,20 +563,20 @@ parseDataTypeConstructorSingleton = do
 -- Right (DeclareType "Animal" [] [DeclareCtor "Dog" [],DeclareCtor "Cat" [],DeclareCtor "Cow" []] k?)
 --
 -- >>> parse parseDataType "" "(data-type (Maybe a) (Just a) Nothing)"
--- Right (DeclareType "Maybe" ["a"] [DeclareCtor "Just" [a],DeclareCtor "Nothing" []] k?)
+-- Right (DeclareType "Maybe" ["a"] [DeclareCtor "Just" [a : k?],DeclareCtor "Nothing" []] k?)
 --
 -- Invalid data type, but it is parsed. Should error in type check.
 -- >>> parse parseDataType "" "(data-type (Maybe a) (Just a b c) Nothing)"
--- Right (DeclareType "Maybe" ["a"] [DeclareCtor "Just" [a,b,c],DeclareCtor "Nothing" []] k?)
+-- Right (DeclareType "Maybe" ["a"] [DeclareCtor "Just" [a : k?,b : k?,c : k?],DeclareCtor "Nothing" []] k?)
 --
 -- >>> parse parseDataType "" "(data-type (Tree a) (Leaf a) (Branch (Tree a) (Tree a)))"
--- Right (DeclareType "Tree" ["a"] [DeclareCtor "Leaf" [a],DeclareCtor "Branch" [(Tree a),(Tree a)]] k?)
+-- Right (DeclareType "Tree" ["a"] [DeclareCtor "Leaf" [a : k?],DeclareCtor "Branch" [(Tree a : k?),(Tree a : k?)]] k?)
 --
 -- >>> parse parseDataType "" "(data-type (Tree a) (Leaf a) (Branch (Tree a) Foo))"
--- Right (DeclareType "Tree" ["a"] [DeclareCtor "Leaf" [a],DeclareCtor "Branch" [(Tree a),Foo]] k?)
+-- Right (DeclareType "Tree" ["a"] [DeclareCtor "Leaf" [a : k?],DeclareCtor "Branch" [(Tree a : k?),Foo]] k?)
 --
 -- >>> parse parseDataType "" "(data-type (Either a b) (Left a) (Right b))"
--- Right (DeclareType "Either" ["a","b"] [DeclareCtor "Left" [a],DeclareCtor "Right" [b]] k?)
+-- Right (DeclareType "Either" ["a","b"] [DeclareCtor "Left" [a : k?],DeclareCtor "Right" [b : k?]] k?)
 --
 parseDataType :: Parser DeclareType
 parseDataType = do
@@ -735,7 +733,7 @@ parseTConst = do
 -- | Parse type variable with unknown kind.
 --
 -- >>> parse parseTVarK "" "abc"
--- Right abc
+-- Right abc : k?
 --
 -- >>> isLeft $ parse parseTVarK "" "Abc"
 -- True
@@ -748,10 +746,10 @@ parseTVarK = do
 -- | Parse type application with unknown kinds.
 --
 -- >>> parse parseTApp "" "(Tree a)"
--- Right (Tree a)
+-- Right (Tree a : k?)
 --
 -- >>> parse parseTApp "" "(Foo a b c)"
--- Right (((Foo a) b) c)
+-- Right (((Foo a : k?) b : k?) c : k?)
 --
 -- >>> isLeft $ parse parseTApp "" "(a b)"
 -- True
