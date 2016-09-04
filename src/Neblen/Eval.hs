@@ -121,7 +121,7 @@ eval' env expr = case expr of
       --
       -- TODO: 'print' should only take string, so we need to type-check that.
       "print" -> do
-        let a = (head args)
+        let a = head args
         let x = eval' env a
         trace (show x) Unit
 

@@ -95,6 +95,9 @@ testCheckLet =
   , "(let [twice (fn [f x] (f (f x))) a (twice (fn [x] 10) 1) b (twice (fn [x] true) false)] b)" =~> "Bool"
   , "(let [twice (fn [f x] (f (f x))) a (twice (fn [x] 10) true)] a)" =!> Mismatch TInt TBool
 
+  -- rank 3 let-polymorphism (@id@ and @g@ both used with two different types)
+  , "(let [id (fn [x] x) g (fn [f x] (f x)) u (g id 3) v (g id true)] v)" =~> "Bool"
+
   -- Checks that let-polymorphism doesn't generalize variables that are bound.
   -- Pierce pg 334.
   , "((fn [f] (let [g f] (g 0))) (fn [x] (if x x x)))" =!> Mismatch TBool (TVar "c")
