@@ -42,7 +42,7 @@ stack test
 # Install doctest
 stack install doctest
 
-stack exec doctest -- -isrc -Wall -fno-warn-type-defaults -fno-warn-unused-do-bind src/Neblen/Parser.hs
+stack exec doctest -- -isrc -Wall -fno-warn-type-defaults -fno-warn-unused-do-bind src/
 ```
 
 # References

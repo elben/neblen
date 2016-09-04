@@ -8,7 +8,8 @@ Neblen supports data types similar to Haskell data types. Here's the `Maybe` dat
   (Just a))
 ```
 
-To check that uasge of type constructors (e.g. `Just` and `Nothing`) valid, we use a concept called "kinds".
+To check that usage of type constructors (e.g. `Just` and `Nothing`) valid, we
+use a concept called "kinds".
 
 ```haskell
 data Kind = Star
@@ -17,19 +18,24 @@ data Kind = Star
 
 For showing, we use `*` for `Star`.
 
-`Nothing` has the kind `*`, and `Just` has the kind `* -> *`, since `Just` accepts one type `a` and returns the type `Maybe a`. So, `Maybe Int` has the kind `*`.
+`Nothing` has the kind `*`, and `Just` has the kind `* -> *`, since `Just`
+accepts one type `a` and returns the type `Maybe a`. So, `Maybe Int` has the
+kind `*`.
 
-## Finding kinds
+## Finding Kinds
 
-In the actual Nelben implementation of kinds, we need kind variables:
+In the actual Neblen implementation of kinds, we need kind variables as a
+place-holder as we solve its kind:
 
 ```haskell
 data Kind = Star
           | KFun Kind Kind
           | KUnknown Int
+          | KUnknownInit
 ```
 
-Data type declarations are represented with `DeclareType`, which contains a list of type constructors, or `DeclareCtor`s:
+Data type declarations are represented with `DeclareType`, which contains a list
+of type constructors, or `DeclareCtor`s:
 
 ```haskell
 -- | Data type declaration.
@@ -41,19 +47,58 @@ data DeclareCtor = DeclareCtor Name [Type]
 -- Maybe data type
 DeclareType "Maybe" ["a"]
   [DeclareCtor "Nothing" [],
+   DeclareCtor "Just" [TVarK "a" KUnknownInit]]
+  KUnknownInit
+```
+
+When the program is first parsed, every data type and type constructor has an
+unknown kind, `KUnknownInit`. The `replaceKUnknownInitsDeclareType` function
+replaces these uninitialized kinds with, `KUnknown Int`, whose kinds we still
+don't know, but at least have unique identifiers:
+
+```haskell
+DeclareType "Maybe" ["a"]
+  [DeclareCtor "Nothing" [],
    DeclareCtor "Just" [TVarK "a" (KUnknown 0)]]
   (KUnknown 1)
 ```
 
-When the program is first parsed, every data type and type constructor has an unknown kind, and so we give it kind variables like `KUnknown 0`. The goal is now to find the kind of each type variable in the type. In doing so, we would be able to build the kind of the data type itself, and also the type constructors.
+The goal is now to find the kind of each type variable in the type. In doing so,
+we would be able to build the kind of the data type itself, and also the type
+constructors.
+
+After solving for the `Maybe` declaration above (using `evalDataTypeKind`), we
+should have:
+
+```haskell
+DeclareType "Maybe" ["a"]
+  [DeclareCtor "Nothing" [],
+   DeclareCtor "Just" [TVarK "a" (KUnknown 0)]]
+  (KFun Star Star)
+
+-- With a kind mapping:
+fromList [("a", Star)]
+```
+
+Note that the `Just` constructor has a `TVarK "a" (KUnknown 0)`. We know that
+`a` must be of kind `*` (the mapping says so). `TVarK "a" (KUnknown 0)` is
+saying that we don't know what kind *will* be supplied for `a`. If the user
+gives us a kind `*`, then all is well. But if it's say `* -> *`, this would be
+an error.
 
 ### General Strategy
 
-The goal is to find the kind of each type in every type constructor. This is similar to an interpreter or type checker—there are terms (type variables like `a` in `(Just a)`), and we go down into each term and try to figure out its kind, building a mapping of type variables to kinds, and also a substitution mapping of kind variables to kinds.
+The goal is to find the kind of each type in every type constructor. This is
+similar to an interpreter or type checker—there are terms (type variables like
+`a` in `(Just a)`), and we go down into each term and try to figure out its
+kind, building a mapping of type variables to kinds, and also a substitution
+mapping of kind variables to kinds.
 
 Look at `evalKindOfType` to see how this is done.
 
-The interesting case is `TApp t1 t2`, because once you evaluate the kind of `t1` and `t2`, you then create a third kind `k3` which is returned by the application. All of this gets remembered in the substitution, like this:
+The interesting case is `TApp t1 t2`, because once you evaluate the kind of `t1`
+and `t2`, you then create a third kind `k3` which is returned by the
+application. All of this gets remembered in the substitution, like this:
 
 ```
 Environment (KEnv):
@@ -80,7 +125,9 @@ exceptT = DeclareType "ExceptT" ["e","m","a"]
           (KUnknown 4)
 ```
 
-What is passed into `evalKindOfType` is the term `TApp (TVarK "m" (KUnknown 0)) …` with two maps, `KEnv`, which is the mapping of type vars to kinds, and `KSubst`, which specifies kind variables substitutions:
+What is passed into `evalKindOfType` is the term `TApp (TVarK "m" (KUnknown 0))
+…` with two maps, `KEnv`, which is the mapping of type vars to kinds, and
+`KSubst`, which specifies kind variables substitutions:
 
 ```
 KEnv:
