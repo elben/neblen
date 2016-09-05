@@ -339,6 +339,9 @@ checkTypeWith e tenv = do
 -- >>> runCheck (M.fromList [("Right", Forall ["x","y"] (TFun [TVar "x", TVar "y", TData "Either" [TVar "y", TVar "x"]]))]) emptySubst (UnaryApp (UnaryApp (Var "Right") (Lit (IntV 10))) (Lit (BoolV True)))
 -- (fromList [("a",Int),("b",Bool),("c",(-> Bool (Either Bool Int))),("d",(Either Bool Int))],(Either Bool Int))
 --
+-- >>> runCheck (M.fromList [("Just", Forall ["z"] (TFun [TVar "z", TData "Maybe" [TVar "z"]]))]) emptySubst (Data "Just" [Lit (IntV 10)])
+-- (fromList [("a",Int),("b",(Maybe Int))],(Maybe Int))
+--
 check :: TEnv -> Subst -> Exp -> TypeCheck (Subst, Type)
 check tenv s e = case e of
   Lit lit ->
@@ -391,11 +394,12 @@ check tenv s e = case e of
     if not (isListOfVars vs)
       then throwE (GenericTypeError (Just ("Ill-defined function: " ++ toLisp e)))
     else do
-     -- Get fresh type variables for every argument variable.
+     -- Get fresh type variables for every argument value variable. So with the
+     -- function (fn [x] x), create fresh type var a1, with mapping @x: a1@.
      tvs <- mapM (const getFresh) vs
 
-     -- Zip the argument variables with its corresponding (fresh) type variables.
-     -- Then insert all of these into the type env.
+     -- Zip the argument variables with its corresponding (fresh) type variables
+     -- (e.g. @x: a1@). Then insert all of these into the type env.
      let tenv' = foldl (\te (Var v, tv) -> insertTEnv te v (toScheme tv)) tenv (L.zip vs tvs)
 
      (s', bodyT) <- check tenv' s body
@@ -428,7 +432,8 @@ check tenv s e = case e of
   -- type-checked when the data constructor was applied. There is no way to
   -- actually type in the primitive form of a data type (e.g. "Maybe" is not a
   -- value to be type-checked); you have to go through the constructor.
-  Data name exprs -> error "Shouldn't need to type check Data."
+  -- Data name exprs -> error "Shouldn't need to type check Data."
+  Data name exprs -> error "not yet"
 
   BinOp{} -> error "Shouldn't need to type check BinOps."
 

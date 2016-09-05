@@ -28,7 +28,8 @@ parseAndEval p =
         Left err -> Left $ show err
         Right answer -> Right answer
 
--- | Substitute variables in expression, but don't apply.
+-- | Substitute variables in expression, but don't apply. This is for @Fun@,
+-- since we don't want to apply the body. See usage.
 --
 subst :: EvalEnv -> Exp -> Exp
 subst env expr = case expr of
@@ -69,6 +70,8 @@ eval' env expr = case expr of
   List es -> List (map (eval' env) es)
 
   Fun vs e -> Fun vs (subst env e)
+
+  Data name vals -> Data name (map (eval' env) vals)
 
   -- NullaryApp should only be called on nullary functions.
   NullaryApp (Fun [] body) -> eval' env body
