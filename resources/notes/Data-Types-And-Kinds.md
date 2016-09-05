@@ -8,19 +8,28 @@ Neblen supports data types similar to Haskell data types. Here's the `Maybe` dat
   (Just a))
 ```
 
-To check that usage of type constructors (e.g. `Just` and `Nothing`) valid, we
-use a concept called "kinds".
+To check that usage of type constructors are valid, we use a concept called
+"kinds". See [Typing Haskell in Haskell](https://web.cecs.pdx.edu/~mpj/thih/)
+and [https://wiki.haskell.org/Kind](https://wiki.haskell.org/Kind).
+For example, `Maybe a` is a type constructor of one argument, `a`. While
+`ExceptT e m a` is a type constructor with three arguments.
 
 ```haskell
 data Kind = Star
           | KFun Kind Kind
 ```
 
-For showing, we use `*` for `Star`.
+For showing, we use `*` for `Star`. Some examples of type constructors and
+their kinds:
 
-`Nothing` has the kind `*`, and `Just` has the kind `* -> *`, since `Just`
-accepts one type `a` and returns the type `Maybe a`. So, `Maybe Int` has the
-kind `*`.
+```haskell
+Int       :: *
+Maybe     :: * -> *
+Maybe Int :: *
+(->)      :: * -> * -> *
+a -> a    :: *
+ExceptT   :: * -> (* -> *) -> * -> *
+```
 
 ## Finding Kinds
 
