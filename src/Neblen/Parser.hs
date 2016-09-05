@@ -266,22 +266,6 @@ parseListWithSurroundingPrefix mp l r ps f = do
 parseListWithSurrounding :: Char -> Char -> Parser [a] -> ([a] -> a) -> Parser a
 parseListWithSurrounding = parseListWithSurroundingPrefix Nothing
 
--- | Parse definition.
---
--- >>> parse parseDef "" "(def x 123)"
--- Right (Def (Var "x") (Lit (IntV 123)))
---
-parseDef :: Parser Exp
-parseDef = try $ do
-  _ <- char '('
-  _ <- try $ string "def"
-  skipSpaces1
-  var <- parseVar
-  skipSpaces1
-  body <- parseExp
-  _ <- char ')'
-  return $ Def var body
-
 -- | Parse unary function calls.
 --
 -- >>> parse parseUnaryApp "" "(x 123)"
@@ -609,9 +593,6 @@ parseDataType = do
 -- >>> parse parseExp "" "+ 13"
 -- Right (Var "+")
 --
--- >>> parse parseExp "" "(def x 123)"
--- Right (Def (Var "x") (Lit (IntV 123)))
---
 -- >>> parse parseExp "" "(foo bar)"
 -- Right (UnaryApp (Var "foo") (Var "bar"))
 --
@@ -631,7 +612,6 @@ parseExp =
   try parseInt <|>
   try parseList <|>
   try parseVector <|>
-  try parseDef <|>
   try parseIf <|>
   try parseLet <|>
   try parseUnaryApp <|>

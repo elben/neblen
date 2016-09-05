@@ -17,7 +17,6 @@ data Value = IntV Int
 data Exp = Lit Value
          | List [Exp]
          | Var Name                 -- Var "x"
-         | Def Exp Exp              -- Def (Var "x") Exp
          | Fun [Exp] Exp            -- Fun [Var "x"] Exp
          | NullaryApp Exp           -- NullaryApp (Fun or Var)
          | UnaryApp Exp Exp         -- UnaryApp (Fun or Var) (Argument value)
@@ -100,7 +99,7 @@ symbolToJsId = M.fromList [
   ('/', "div")]
 
 reservedIds :: S.Set String
-reservedIds = S.fromList ["def", "fn", "let"]
+reservedIds = S.fromList ["fn", "let"]
 
 standardFuns :: M.Map String JSProgram
 standardFuns = M.fromList [

@@ -1,7 +1,6 @@
 module Neblen.Utils where
 
 import Neblen.Data
-import qualified Data.List as L
 
 -- | Converts the AST to the original Neblen program.
 --
@@ -24,14 +23,14 @@ import qualified Data.List as L
 -- >>> toLisp (If (Var "x") (Var "y") (Var "z"))
 -- "(if x y z)"
 --
--- >>> toLisp (Def (Var "x") (Var "y"))
--- "(def x y)"
---
 -- >>> toLisp (NullaryApp (Var "x"))
 -- "(x)"
 --
 -- >>> toLisp (Fun [] (Var "x"))
 -- "(fn [] x)"
+--
+-- >>> toLisp (Data "Just" [Lit (IntV 3)])
+-- "(Just 3)"
 --
 toLisp :: Exp -> String
 toLisp (Lit (IntV v)) = show v
@@ -40,7 +39,7 @@ toLisp (Lit (StringV v)) = show v
 toLisp (List []) = "[]"
 toLisp (List (a:as)) = "[" ++ toLisp a ++ foldl (\s e -> s ++ " " ++ toLisp e) "" as ++ "]"
 toLisp (Var v) = v
-toLisp (Def var body) = "(def " ++ toLisp var ++ " " ++ toLisp body ++ ")"
+toLisp (Data name exprs) = "(" ++ name ++ " " ++ unwords (map toLisp exprs) ++ ")"
 toLisp (Fun vs body) = "(fn [" ++ unwords (map toLisp vs) ++ "] " ++ toLisp body ++ ")"
 toLisp (NullaryApp body) = "(" ++ toLisp body ++ ")"
 toLisp (UnaryApp fn body) = "(" ++ toLisp fn ++ " " ++ toLisp body ++ ")"

@@ -431,7 +431,6 @@ check tenv s e = case e of
   Data name exprs -> error "Shouldn't need to type check Data."
 
   BinOp{} -> error "Shouldn't need to type check BinOps."
-  Def{} -> error "TODO"
 
 getNumArgs :: Type -> Int
 getNumArgs (TFun vs) = length vs - 1

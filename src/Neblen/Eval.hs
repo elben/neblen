@@ -139,8 +139,6 @@ eval' env expr = case expr of
       in Lit (BoolV c)
     _ -> error "Invalid BinOp."
 
-  Def {} -> error "TODO"
-
 extractInt :: Exp -> Int
 extractInt (Lit (IntV v)) = v
 extractInt _ = error "not an int"

@@ -146,7 +146,6 @@ emitExp :: Env -> Exp -> JSProgram
 emitExp _ (Lit v) = emitValue v
 emitExp env (List v) = emitVector env v
 emitExp _ (Var s) = xformVar s
-emitExp env (Def var expr) = emitDef env var expr
 -- emitExp env (NullaryFun expr) = emitNullaryFun env expr
 -- emitExp env (Fun var expr) = emitFun env var expr
 emitExp env (UnaryApp fun arg) = emitUnaryApp env fun arg
