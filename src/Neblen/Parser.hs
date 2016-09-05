@@ -487,7 +487,6 @@ parseDataTypeWithTvars = do
   _ <- char ')'
   return (name, tvars)
 
-
 -- | Parse data type name.
 --
 -- >>> parse parseDataTypeName "" "Animal"

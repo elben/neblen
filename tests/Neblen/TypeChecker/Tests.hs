@@ -250,7 +250,6 @@ withEnv = id
   -> Test
 (=~>) expr t =
   testCase ("check: " ++ expr ++ " : " ++ t) $
-  -- snd (run (check emptyTEnv emptySubst (toExp expr)))
   run (checkType (toExp expr))
   @?= toType t
 

@@ -139,6 +139,7 @@ instance Substitutable Type where
   apply s (TVar tv) = fromMaybe (TVar tv) (M.lookup tv s)
   apply s (TFun vs) = TFun (map (apply s) vs)
   apply s (TList t) = TList (apply s t)
+  apply s (TData n vs) = TData n (map (apply s) vs)
   apply _ t = t
 
   ftvs (TVar tv) = S.singleton (TVar tv)
@@ -238,6 +239,7 @@ unify (TFun lhs) (TFun rhs) =
 unify t TFun{} = throwE (FunctionExpected t)
 unify t1 t2 = throwE $ Mismatch t1 t2
 
+-- | Unify a type variable (left-hand side) with the right-hand side type.
 unifyTVar :: Type -> Type -> TypeCheck Subst
 unifyTVar t1@(TVar tv) t2 | t1 == t2 = return emptySubst
                           | occursCheck t1 t2 = throwE $ InfiniteType t1 t2
@@ -330,6 +332,12 @@ checkTypeWith e tenv = do
 --
 -- >>> runCheck emptyTEnv emptySubst (Let (Var "id") (Fun [Var "x"] (Var "x")) (Let (Var "y") (UnaryApp (Var "id") (Lit (IntV 3))) (Let (Var "z") (UnaryApp (Var "id") (Lit (BoolV True))) (Var "z"))))
 -- (fromList [("b",Int),("c",Int),("d",Bool),("e",Bool)],Bool)
+--
+-- >>> runCheck (M.fromList [("Just", Forall ["z"] (TFun [TVar "z", TData "Maybe" [TVar "z"]]))]) emptySubst (UnaryApp (Var "Just") (Lit (IntV 10)))
+-- (fromList [("a",Int),("b",(Maybe Int))],(Maybe Int))
+--
+-- >>> runCheck (M.fromList [("Right", Forall ["x","y"] (TFun [TVar "x", TVar "y", TData "Either" [TVar "y", TVar "x"]]))]) emptySubst (UnaryApp (UnaryApp (Var "Right") (Lit (IntV 10))) (Lit (BoolV True)))
+-- (fromList [("a",Int),("b",Bool),("c",(-> Bool (Either Bool Int))),("d",(Either Bool Int))],(Either Bool Int))
 --
 check :: TEnv -> Subst -> Exp -> TypeCheck (Subst, Type)
 check tenv s e = case e of
@@ -458,7 +466,8 @@ isListOfVars _ = False
 reorderTVars :: Type -> TypeCheck Type
 reorderTVars t = liftM snd (freshenWithSubst emptySubst (generalize emptyTEnv emptySubst t))
 
--- | Insert fresh variables for universally-quantified types.
+-- | Insert fresh variables for universally-quantified types. That is, given
+-- univerally-quantified variables, replace with new un-used type variables.
 --
 -- >>> runWithFreshCounter (freshen (Forall ["x","y"] (TFun [TVar "x",TVar "y",TVar "c"])))
 -- Right (-> a b c)
@@ -467,7 +476,11 @@ freshen :: TypeScheme -> TypeCheck Type
 freshen ts = liftM snd (freshenWithSubst emptySubst ts)
 
 -- | Insert fresh variables for universally-quantified types, given a Subst
--- context.
+-- context. Helper function for @freshen@. The Subst context in here is local to
+-- the universal quantifier.
+--
+-- In the example below, we have a mapping @x: Int@ where that @x@ is the same
+-- @x@ in the universal quantifier.
 --
 -- >>> runWithFreshCounter (freshenWithSubst (M.fromList [("x",TInt)]) (Forall ["x","y"] (TFun [TVar "x",TVar "y",TVar "c"])))
 -- Right (fromList [("x",Int),("y",a)],(-> Int a c))
@@ -504,20 +517,48 @@ freshenWithSubst s (Forall utvs (TFun vs)) = do
   -- Note it is backwards, since we use a foldl (and not foldr since we want
   -- fresh variables in order). This is why we reverse it at the end.
   --
-  (s', vs') <-
-    foldl
-      (\tc v -> do
-        (s1, sumArgs) <- tc
-        (s2, v1) <- freshenWithSubst s1 (Forall utvs v)
-        return (s2, v1:sumArgs))
-      (return (s, []))
-      vs
+  (s', vs') <- freshenVars s utvs vs
   return (s', TFun (reverse vs'))
+
+freshenWithSubst s (Forall utvs (TData name vs)) = do
+  (s', vs') <- freshenVars s utvs vs
+  return (s', TData name (reverse vs'))
 
 freshenWithSubst s (Forall utvs (TList tv)) = do
   (s1, tv1) <- freshenWithSubst s (Forall utvs tv)
   return (s1, TList tv1)
 freshenWithSubst s (Forall _ t) = return (s, t)
+
+-- | Create fresh variables for each variable in @vs@ that are universally
+-- quantified in @utvs@.
+--
+-- For each argument variable:
+--
+--   * Grab the previous substitution and the already-freshened type vars list
+--   * Freshen the current type
+--   * Append that type to the already-freshened type vars list
+--
+-- For example, if we have @Fun [x y z]@, we will convert @x@ to @a@,
+-- then @y@ to @b@, and so on. This will be built in the list as @[c b a]@.
+-- Note it is backwards, since we use a foldl (and not foldr since we want
+-- fresh variables in order). This is why we reverse it at the end.
+--
+freshenVars ::
+  Subst
+  -- ^ The substitution mappings
+  -> [TName]
+  -- ^ Universally-quantified variables
+  -> [Type]
+  -- ^ The types that we look for variables in the universally-quantified list
+  -- from, to be replaced with fresh variables.
+  -> TypeCheck (Subst, [Type])
+freshenVars subst utvs =
+  foldl
+    (\tc v -> do
+      (s1, sumArgs) <- tc
+      (s2, v1) <- freshenWithSubst s1 (Forall utvs v)
+      return (s2, v1:sumArgs))
+    (return (subst, []))
 
 ------------------------------------------
 -- Utilities

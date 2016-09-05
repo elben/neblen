@@ -31,6 +31,8 @@ type KSubst = M.Map Int Kind
 -- | Mapping of data type constant to kind. (e.g. Either : * -> * -> *)
 type KConstEnv = M.Map TName Kind
 
+-- | The KindCheck context gives a fresh variable generator for the computation
+-- of @a@.
 type KindCheck a = State FreshCounter a
 
 -- | Evaluate a type declaration. Returns a new data type environment, and the

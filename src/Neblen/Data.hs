@@ -16,16 +16,17 @@ data Value = IntV Int
 
 data Exp = Lit Value
          | List [Exp]
-         | Var Name          -- ^ Var "x"
-         | Def Exp Exp       -- ^ Def (Var "x") Exp
-         | Fun [Exp] Exp
-         | NullaryApp Exp    -- ^ NullaryApp (Fun or Var)
-         | UnaryApp Exp Exp  -- ^ UnaryApp (Fun or Var) (Argument value)
-         | Let Exp Exp Exp   -- ^ Let (Var "x") (Value of x) Body.
-         | If Exp Exp Exp    -- ^ If (Predicate : Bool) (Then clause) (Else clause)
-         | BinOp String Exp Exp     -- ^ Primitive function with 2 arguments
-         | PrimitiveOp String [Exp] -- ^ Primitive function with n arguments
-         | Unit
+         | Var Name                 -- Var "x"
+         | Def Exp Exp              -- Def (Var "x") Exp
+         | Fun [Exp] Exp            -- Fun [Var "x"] Exp
+         | NullaryApp Exp           -- NullaryApp (Fun or Var)
+         | UnaryApp Exp Exp         -- UnaryApp (Fun or Var) (Argument value)
+         | Let Exp Exp Exp          -- Let (Var "x") (Value of x) Body
+         | If Exp Exp Exp           -- If (Predicate : Bool) (Then clause) (Else clause)
+         | BinOp String Exp Exp     -- Primitive function with 2 arguments
+         | PrimitiveOp String [Exp] -- Primitive function with n arguments
+         | Data Name [Exp]          -- Data type value: Data "Just" [Lit (IntV 10)]
+         | Unit                     -- A "void" return type (e.g. for @print@ function)
   deriving (Show, Eq)
 
 -- Type variable.
@@ -35,7 +36,7 @@ type TName = String
 data DeclareType = DeclareType Name [TName] [DeclareCtor] Kind
   deriving (Show, Eq, Ord)
 
--- | Data type constructor declaration.
+-- | Data type constructor declaration (not evaluation).
 data DeclareCtor = DeclareCtor Name [Type]
   deriving (Show, Eq, Ord)
 
@@ -60,6 +61,7 @@ data Type = TUnit
           | TFun [Type]
           | TList Type
           | TVar TName
+          | TData TName [Type] -- TData "Either" [Int, TVar "b"]
 
           -- Stuff with kinds:
           | TConst TName Kind -- e.g. TConst "Either" (* -> * -> *)
@@ -126,6 +128,7 @@ instance Show Type where
   show (TFun ts) = "(-> " ++ unwords (map show ts) ++ ")"
   show (TList a) = "[" ++ show a ++ "]"
   show (TVar n) = n
+  show (TData name types) = "(" ++ name ++ " " ++ unwords (map show types) ++ ")"
   show (TConst n _) = n
   -- show (TVarK n _) = n
   show (TVarK n k) = n ++ " : " ++ show k
